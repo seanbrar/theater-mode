@@ -1,0 +1,34 @@
+[Unit]
+Description=Theater mode daemon (dims other screens while a Steam game is on one)
+PartOf=graphical-session.target
+After=plasma-workspace.target
+
+[Service]
+Type=simple
+# Switch effects without editing this file:
+#   systemctl --user edit theater-mode.service
+# then add:
+#   [Service]
+#   Environment=THEATER_EFFECT=brightness
+# and: systemctl --user restart theater-mode.service
+Environment=THEATER_EFFECT=log
+Environment=THEATER_DIM_FACTOR=0.35
+Environment=THEATER_REVERT_DELAY=3
+Environment=THEATER_SETTLE_SECONDS=1.5
+Environment=THEATER_STAGE_DELAY=1.5
+# Unbraced on purpose: an empty $THEATER_VERBOSE expands to no argument at all,
+# while ${THEATER_VERBOSE} would pass an empty string and fail argument parsing.
+Environment=THEATER_VERBOSE=
+ExecStart=%h/.local/bin/theater-moded \
+    --effect ${THEATER_EFFECT} \
+    --dim-factor ${THEATER_DIM_FACTOR} \
+    --revert-delay ${THEATER_REVERT_DELAY} \
+    --settle-seconds ${THEATER_SETTLE_SECONDS} \
+    --stage-delay ${THEATER_STAGE_DELAY} \
+    $THEATER_VERBOSE
+Restart=on-failure
+RestartSec=5
+Slice=session.slice
+
+[Install]
+WantedBy=graphical-session.target

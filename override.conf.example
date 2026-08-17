@@ -1,0 +1,33 @@
+# Example settings drop-in.
+#
+# Do not copy this file into place by hand — create the real one with:
+#
+#   systemctl --user edit theater-mode.service
+#
+# which writes ~/.config/systemd/user/theater-mode.service.d/override.conf and
+# reloads systemd for you. Only include the values you actually want to change;
+# anything omitted falls back to the defaults in theater-mode.service.
+#
+# Every setting is documented in README.md.
+
+[Service]
+
+# log (dry run) | brightness | wallpaper — comma separated to combine
+Environment=THEATER_EFFECT=brightness,wallpaper
+
+# Fraction of each screen's own brightness to dim to. Lower is darker.
+Environment=THEATER_DIM_FACTOR=0.20
+
+# How long a brightness change takes to reach the monitor. Not a fade: it times
+# the wallpaper switch so it lands once the screens have actually darkened.
+Environment=THEATER_SETTLE_SECONDS=1.5
+
+# How long a game must stay on a new screen before the effect follows it.
+Environment=THEATER_STAGE_DELAY=1.5
+
+# Grace period before restoring, so a launcher handing off to the game does not
+# flash the other screens.
+Environment=THEATER_REVERT_DELAY=3
+
+# Uncomment to log every window event, not just games.
+# Environment=THEATER_VERBOSE=--verbose
