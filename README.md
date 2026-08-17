@@ -170,3 +170,11 @@ client. A game with no cached hero art is skipped with a note in the log, and st
   put it back to what it was before the game started.
 - The daemon restores brightness on exit and on crash. If a screen is ever stuck dim, run `Clear`
   or restart the service.
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development workflows, testing, and commit guidelines.
+
+## License
+
+MIT. See [LICENSE](LICENSE) for details.
