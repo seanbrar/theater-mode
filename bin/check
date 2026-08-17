@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+#
+# Ultra-fast sanity check (<30ms) for tests, syntax, and code formatting.
+# Can be run directly (./bin/check) or installed as a git pre-commit hook.
+
+set -euo pipefail
+
+REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_DIR"
+
+# Detect host Python site-packages if running inside container
+EXTRA_PYTHONPATH=""
+for p in /run/host/usr/lib64/python3.*/site-packages /run/host/usr/lib/python3.*/site-packages; do
+    if [ -d "$p" ]; then
+        EXTRA_PYTHONPATH="${EXTRA_PYTHONPATH:+$EXTRA_PYTHONPATH:}$p"
+    fi
+done
+
+echo "[check] Running unit tests..."
+PYTHONPATH="src${EXTRA_PYTHONPATH:+:$EXTRA_PYTHONPATH}" python3 -m unittest discover -s tests -q
+
+RUFF_CMD=""
+if command -v ruff >/dev/null 2>&1; then
+    RUFF_CMD="ruff"
+elif [ -x /home/linuxbrew/.linuxbrew/bin/ruff ]; then
+    RUFF_CMD="/home/linuxbrew/.linuxbrew/bin/ruff"
+elif [ -x /run/host/home/linuxbrew/.linuxbrew/bin/ruff ] && [ -x /run/host/lib64/ld-linux-x86-64.so.2 ]; then
+    RUFF_CMD="/run/host/lib64/ld-linux-x86-64.so.2 --library-path /run/host/usr/lib64:/run/host/home/linuxbrew/.linuxbrew/lib /run/host/home/linuxbrew/.linuxbrew/bin/ruff"
+fi
+
+if [ -n "$RUFF_CMD" ]; then
+    echo "[check] Running ruff linter & formatter check..."
+    $RUFF_CMD check .
+    $RUFF_CMD format --check .
+else
+    echo "[check] Checking syntax compilation (ruff not found)..."
+    python3 -m compileall -q src bin tests
+fi
+
+echo "[check] All checks passed cleanly."

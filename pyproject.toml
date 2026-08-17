@@ -1,0 +1,14 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# E: pycodestyle errors, F: Pyflakes, W: warnings, I: isort, UP: pyupgrade
+select = ["E", "F", "W", "I", "UP"]
+ignore = [
+    "E501",  # Line length handled by formatter
+    "E402",  # Module level imports after gi.require_version()
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["theater_mode"]

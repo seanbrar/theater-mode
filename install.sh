@@ -63,6 +63,7 @@ do_install() {
     echo "Installing theater-mode ($MODE):"
     place "$REPO/bin/theater-moded" "$DAEMON"
     chmod +x "$REPO/bin/theater-moded"
+    place "$REPO/src/theater_mode" "$DATA_DIR/theater-mode/lib/theater_mode"
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
     place "$REPO/systemd/theater-mode.service" "$UNIT"
     place "$REPO/README.md" "$DOC"
@@ -99,7 +100,7 @@ EOF
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$DOC")
+    local targets=("$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$DOC" "$DATA_DIR/theater-mode/lib")
     local found=0
     for t in "${targets[@]}"; do
         if [ -e "$t" ] || [ -L "$t" ]; then

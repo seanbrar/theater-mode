@@ -32,6 +32,7 @@ settings, cached artwork and saved state alone.
 | Path | Installs to |
 | --- | --- |
 | `bin/theater-moded` | `~/.local/bin/theater-moded` |
+| `src/theater_mode/` | `~/.local/share/theater-mode/lib/theater_mode/` |
 | `kwin/theater-detect/` | `~/.local/share/kwin/scripts/theater-detect/` |
 | `systemd/theater-mode.service` | `~/.config/systemd/user/theater-mode.service` |
 | `README.md` | `~/.local/share/theater-mode/README.md` |
