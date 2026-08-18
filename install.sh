@@ -22,13 +22,31 @@ DAEMON="$BIN_DIR/theater-moded"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
 DOC="$DATA_DIR/theater-mode/README.md"
+APP_DATA="$DATA_DIR/theater-mode"
 
 MODE=copy
+FORCE=0
 
 # --------------------------------------------------------------------------
 
-die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+warn() { printf '\033[33mwarning:\033[0m %s\n' "$*" >&2; }
 info() { printf '  %s\n' "$*"; }
+
+show_help() {
+    cat <<'EOF'
+Install theater-mode into the user's home ($HOME) without elevation.
+
+Usage:
+  ./install.sh [OPTIONS]
+
+Options:
+  -l, --link       Symlink files into place instead of copying (for development)
+  -u, --uninstall  Remove installed binaries, KWin script, and systemd unit
+  -y, --yes        Answer yes to uninstall confirmation prompts non-interactively
+  -h, --help       Show this help message
+EOF
+}
 
 # Every install goes through here so copy and symlink modes cannot drift apart.
 place() {
@@ -46,30 +64,39 @@ place() {
 
 check_prerequisites() {
     local missing=()
+    command -v python3 >/dev/null || missing+=("python3 (>= 3.9)")
     command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
     command -v make >/dev/null || missing+=("make")
     command -v pkg-config >/dev/null || missing+=("pkg-config")
     command -v systemctl >/dev/null || missing+=("systemctl")
-    python3 -c 'import gi; gi.require_version("Gio", "2.0")' 2>/dev/null \
-        || missing+=("python3 gobject bindings (python3-gobject)")
+
+    if command -v python3 >/dev/null; then
+        python3 -c 'import gi; gi.require_version("Gio", "2.0"); gi.require_version("GLib", "2.0")' 2>/dev/null \
+            || missing+=("python3 gobject bindings (python3-gobject / python-gobject)")
+    fi
 
     # Check libwayland client development headers required to compile theater-dimmer
     if command -v pkg-config >/dev/null; then
         pkg-config --exists wayland-client \
-            || missing+=("libwayland client development files (wayland-devel / libwayland-dev)")
+            || missing+=("libwayland client development files (wayland-devel / libwayland-dev / wayland)")
     fi
 
     if [ ${#missing[@]} -gt 0 ]; then
-        printf 'missing prerequisites:\n' >&2
+        printf '\033[31merror:\033[0m missing prerequisites:\n' >&2
         printf '  - %s\n' "${missing[@]}" >&2
         die "please install missing dependencies"
     fi
 
+    # Check if target bin directory is in user PATH
+    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+        warn "$BIN_DIR is not in your PATH. You may need to add it to your ~/.bashrc or ~/.profile."
+    fi
+
     # Pillow is optional; without it, secondary screens dim to plain black without artwork
-    python3 -c 'import PIL' 2>/dev/null || cat >&2 <<'EOF'
-warning: python3-pillow is not installed. Game artwork cannot be generated,
-         so secondary displays will dim to plain black.
-EOF
+    if command -v python3 >/dev/null && ! python3 -c 'import PIL' 2>/dev/null; then
+        warn "python3-pillow is not installed. Game artwork cannot be generated,"
+        warn "         so secondary displays will dim to plain black."
+    fi
 }
 
 do_install() {
@@ -83,7 +110,7 @@ do_install() {
     chmod +x "$DIMMER_BIN"
     place "$REPO/bin/theater-moded" "$DAEMON"
     chmod +x "$DAEMON"
-    place "$REPO/src/theater_mode" "$DATA_DIR/theater-mode/lib/theater_mode"
+    place "$REPO/src/theater_mode" "$APP_DATA/lib/theater_mode"
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
     place "$REPO/systemd/theater-mode.service" "$UNIT"
     place "$REPO/README.md" "$DOC"
@@ -116,7 +143,7 @@ EOF
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$DIMMER_BIN" "$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$DOC" "$DATA_DIR/theater-mode/lib")
+    local targets=("$DIMMER_BIN" "$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA")
     local found=0
     for t in "${targets[@]}"; do
         if [ -e "$t" ] || [ -L "$t" ]; then
@@ -134,23 +161,44 @@ do_uninstall() {
     info "$CONF_DIR/systemd/user/theater-mode.service.d/"
     info "${XDG_CACHE_HOME:-$HOME/.cache}/theater-mode/"
     echo
-    read -r -p "Remove the $found item(s) above? [y/N] " reply
-    [ "$reply" = y ] || [ "$reply" = Y ] || { echo "Cancelled."; return 0; }
+
+    if [ "$FORCE" -eq 0 ]; then
+        read -r -p "Remove the $found item(s) above? [y/N] " reply
+        [ "$reply" = y ] || [ "$reply" = Y ] || { echo "Cancelled."; return 0; }
+    fi
 
     systemctl --user disable --now theater-mode.service >/dev/null 2>&1 || true
-    for t in "${targets[@]}"; do
-        rm -rf "$t"
-    done
+    rm -rf "${targets[@]}"
     systemctl --user daemon-reload || true
+
+    # Attempt to notify KWin if running
+    if command -v busctl >/dev/null 2>&1; then
+        busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting unloadScript s "theater-detect" >/dev/null 2>&1 || true
+    elif command -v qdbus6 >/dev/null 2>&1; then
+        qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript theater-detect >/dev/null 2>&1 || true
+    elif command -v qdbus >/dev/null 2>&1; then
+        qdbus org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript theater-detect >/dev/null 2>&1 || true
+    fi
 
     echo
     echo "Uninstalled. Remember to disable \"Theater Mode Detector\" in System Settings -> KWin Scripts."
 }
 
-case "${1:-}" in
-    "")           do_install ;;
-    --link)       MODE=link; do_install ;;
-    --uninstall)  do_uninstall ;;
-    -h|--help)    sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
-    *)            die "unknown option: $1 (try --help)" ;;
-esac
+ACTION="install"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -l|--link)       MODE=link ;;
+        -u|--uninstall)  ACTION="uninstall" ;;
+        -y|--yes|-f|--force) FORCE=1 ;;
+        -h|--help)       show_help; exit 0 ;;
+        *)               die "unknown option: $1 (try --help)" ;;
+    esac
+    shift
+done
+
+if [ "$ACTION" = "uninstall" ]; then
+    do_uninstall
+else
+    do_install
+fi
+
