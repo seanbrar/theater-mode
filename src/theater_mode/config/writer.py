@@ -36,7 +36,7 @@ def format_toml_value(val: Any) -> str:
     raise TypeError(f"Unsupported TOML value type: {type(val).__name__}")
 
 
-def _format_table_header(table: str) -> str:
+def format_table_header(table: str) -> str:
     """Render a table path as a header, quoting an output id that is not a bare key.
 
     The id is emitted as a single quoted key rather than split on its dots: vendor names
@@ -128,7 +128,7 @@ def update_toml_content(original_content: str, updates: dict[str, Any]) -> str:
     for table in sorted(set(table_updates) - written_tables):
         if new_lines and new_lines[-1].strip():
             new_lines.append("")
-        new_lines.append(_format_table_header(table))
+        new_lines.append(format_table_header(table))
         new_lines.extend(f"{k} = {v}" for k, v in sorted(table_updates[table].items()))
 
     return "\n".join(new_lines).rstrip("\n") + "\n"

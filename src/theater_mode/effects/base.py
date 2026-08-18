@@ -6,7 +6,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from theater_mode.config.schema import DEFAULT_CURVE, DEFAULT_DIM_FACTOR, DEFAULT_DURATION
+from theater_mode.config.schema import (
+    DEFAULT_CURVE,
+    DEFAULT_DIM_FACTOR,
+    DEFAULT_DURATION,
+    DEFAULT_PLACEMENT,
+)
 
 if TYPE_CHECKING:
     from theater_mode.config import ResolvedConfig
@@ -16,6 +21,7 @@ if TYPE_CHECKING:
 class EffectOptions:
     """Configuration options passed to effect initializers."""
 
+    placement: str = DEFAULT_PLACEMENT
     dim_factor: float = DEFAULT_DIM_FACTOR
     dim_duration: float = DEFAULT_DURATION
     dim_curve: str = DEFAULT_CURVE
@@ -26,6 +32,7 @@ class EffectOptions:
     def from_config(cls, config: ResolvedConfig) -> EffectOptions:
         """Create options directly from a ResolvedConfig object."""
         return cls(
+            placement=config.effect.placement,
             dim_factor=config.effect.dim_factor,
             dim_duration=config.transition.duration,
             dim_curve=config.transition.curve,

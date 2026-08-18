@@ -13,7 +13,11 @@
 # Options: ["dim", "log"]
 mode = "dim"
 
-# Fraction of secondary display brightness to reduce (0.0 = no dimming, 1.0 = solid black, 0.85 = 15% brightness).
+# Where the effect sits: 'over_windows' covers whatever is on the display, blocking its light; 'behind_windows' paints on the desktop behind your open windows, which stay visible and usable.
+# Options: ["behind_windows", "over_windows"]
+placement = "over_windows"
+
+# Fraction of brightness to remove (0.0 = untouched, 1.0 = solid black, 0.85 = 15% brightness). With placement 'over_windows' this dims everything on the display; with 'behind_windows' it only darkens what is drawn behind your windows, where a much lower value usually reads better.
 # Range: [min: 0.0, max: 1.0]
 dim_factor = 0.85
 
@@ -46,7 +50,7 @@ require_fullscreen = false
 # -----------------------------------------------------------------------------
 # Per-Output Overrides (Optional)
 #
-# Overridable keys: dim_factor, art, duration, curve
+# Overridable keys: placement, dim_factor, art, duration, curve
 #
 # Outputs are matched in this order, and the first section that exists wins:
 #   1. make:model:serial  - pins one physical panel, even among identical models

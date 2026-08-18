@@ -20,7 +20,11 @@ from theater_mode.config.schema import (
     ResolvedDisplaySettings,
     TransitionConfig,
 )
-from theater_mode.config.writer import commit_user_config, update_toml_content
+from theater_mode.config.writer import (
+    commit_user_config,
+    format_table_header,
+    update_toml_content,
+)
 
 __all__ = [
     "ConfigLoader",
@@ -35,6 +39,7 @@ __all__ = [
     "ResolvedDisplaySettings",
     "TransitionConfig",
     "commit_user_config",
+    "format_table_header",
     "generate_reference_config",
     "get_default_system_path",
     "get_default_user_path",

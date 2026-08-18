@@ -8,6 +8,7 @@
  * Commands on stdin:
  *   ART <output> <width> <height> <path>   Stage artwork for an output
  *   ART <output>                           Clear staged artwork (revert to black)
+ *   LAYER <output> <overlay|bottom>        Set layer-shell stacking layer
  *   DIM <outputs_comma_separated> <target_alpha> <duration_sec> [easing]
  *                                          Select the dimmed set: listed outputs
  *                                          animate to target_alpha, all others fade out
@@ -47,8 +48,14 @@
 #define MAX_ART_EDGE 16384
 
 #define COMPOSITOR_VERSION 4
+/* Highest version we know how to drive, and the lowest we can work with.
+ * Binding above what a compositor advertises is a protocol error that kills the
+ * connection, so both globals are clamped and the floors are reported by name. */
 #define LAYER_SHELL_VERSION 4
+#define LAYER_SHELL_VERSION_MIN 1
+#define LAYER_SHELL_SET_LAYER_VERSION 2
 #define OUTPUT_VERSION 4
+#define OUTPUT_VERSION_MIN 4
 
 /* Timeout to step animation if compositor stops delivering frame callbacks */
 #define FRAME_STALL_SEC 0.1
@@ -72,6 +79,9 @@ struct output_state {
 
     /* Staged artwork, or NULL for flat black. */
     struct wl_buffer *art;
+
+    /* Stacking layer (default ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) */
+    enum zwlr_layer_shell_v1_layer layer;
 
     /* Overlay surface state */
     struct wl_surface *surface;
@@ -98,6 +108,7 @@ struct dimmer_app {
     struct wl_registry *registry;
     struct wl_compositor *compositor;
     struct zwlr_layer_shell_v1 *layer_shell;
+    uint32_t layer_shell_version;
     struct wp_viewporter *viewporter;
     struct wp_single_pixel_buffer_manager_v1 *pixel_buffers;
     struct wp_alpha_modifier_v1 *alpha_modifier;
@@ -156,6 +167,26 @@ static const char *easing_to_string(enum easing_curve curve) {
         case EASING_SINE:
         default: return "sine";
     }
+}
+
+/* Only the two layers the project exposes. TOP is indistinguishable from OVERLAY
+ * for a fullscreen click-through surface, and BACKGROUND sits below Plasma's own
+ * desktop containment, where nothing would be visible. */
+static bool parse_layer(const char *str, enum zwlr_layer_shell_v1_layer *out) {
+    if (!str) return false;
+    if (strcasecmp(str, "overlay") == 0) {
+        *out = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+        return true;
+    }
+    if (strcasecmp(str, "bottom") == 0) {
+        *out = ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM;
+        return true;
+    }
+    return false;
+}
+
+static const char *layer_to_string(enum zwlr_layer_shell_v1_layer layer) {
+    return layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM ? "bottom" : "overlay";
 }
 
 /* Convert 0.0-1.0 alpha to wp_alpha_modifier uint32 multiplier. */
@@ -349,7 +380,7 @@ static int map_overlay(struct dimmer_app *app, struct output_state *out) {
         app->layer_shell,
         out->surface,
         out->wl_output,
-        ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+        out->layer,
         "theater-dimmer"
     );
     if (!out->layer_surface) {
@@ -496,17 +527,37 @@ static const struct wl_output_listener output_listener = {
     .description = output_description,
 };
 
+/* Never ask for more than the compositor advertises: wl_registry_bind above the
+ * advertised version is a protocol error, and the compositor answers by dropping
+ * the connection with no explanation the user could act on. */
+static uint32_t bind_version(uint32_t advertised, uint32_t wanted) {
+    return advertised < wanted ? advertised : wanted;
+}
+
 static void registry_global(void *data, struct wl_registry *registry, uint32_t id,
                             const char *interface, uint32_t version) {
-    (void)version;
     struct dimmer_app *app = (struct dimmer_app *)data;
 
     if (strcmp(interface, wl_compositor_interface.name) == 0) {
-        app->compositor =
-            wl_registry_bind(registry, id, &wl_compositor_interface, COMPOSITOR_VERSION);
+        app->compositor = wl_registry_bind(registry, id, &wl_compositor_interface,
+                                           bind_version(version, COMPOSITOR_VERSION));
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-        app->layer_shell =
-            wl_registry_bind(registry, id, &zwlr_layer_shell_v1_interface, LAYER_SHELL_VERSION);
+        if (version < LAYER_SHELL_VERSION_MIN) {
+            fprintf(stderr,
+                    "theater-dimmer: compositor advertises zwlr_layer_shell_v1 version %u, "
+                    "need at least %u\n",
+                    version, LAYER_SHELL_VERSION_MIN);
+            return;
+        }
+        app->layer_shell_version = bind_version(version, LAYER_SHELL_VERSION);
+        app->layer_shell = wl_registry_bind(registry, id, &zwlr_layer_shell_v1_interface,
+                                            app->layer_shell_version);
+        if (app->layer_shell_version < LAYER_SHELL_SET_LAYER_VERSION) {
+            fprintf(stderr,
+                    "theater-dimmer: zwlr_layer_shell_v1 version %u cannot restack a mapped "
+                    "surface; a placement change will apply the next time theater mode starts\n",
+                    app->layer_shell_version);
+        }
     } else if (strcmp(interface, wp_viewporter_interface.name) == 0) {
         app->viewporter = wl_registry_bind(registry, id, &wp_viewporter_interface, 1);
     } else if (strcmp(interface, wp_single_pixel_buffer_manager_v1_interface.name) == 0) {
@@ -517,6 +568,17 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t i
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         app->shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
+        /* wl_output v4 introduced the name event, which is the only way an output
+         * can be addressed by connector name. Below that the helper has nothing to
+         * match ART, DIM, or LAYER against, so say so rather than going silent. */
+        if (version < OUTPUT_VERSION_MIN) {
+            fprintf(stderr,
+                    "theater-dimmer: compositor advertises wl_output version %u, need at "
+                    "least %u for connector names; this output cannot be targeted\n",
+                    version, OUTPUT_VERSION_MIN);
+            return;
+        }
+
         struct output_state *out = NULL;
         for (int i = 0; i < MAX_OUTPUTS; i++) {
             if (!app->outputs[i].in_use) {
@@ -534,8 +596,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t i
         out->app = app;
         out->in_use = true;
         out->global_id = id;
-        out->wl_output =
-            wl_registry_bind(registry, id, &wl_output_interface, OUTPUT_VERSION);
+        out->layer = ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY;
+        out->wl_output = wl_registry_bind(registry, id, &wl_output_interface,
+                                          bind_version(version, OUTPUT_VERSION));
         wl_output_add_listener(out->wl_output, &output_listener, out);
     }
 }
@@ -728,15 +791,63 @@ static void handle_fade_out(struct dimmer_app *app) {
     fflush(stdout);
 }
 
+static void handle_layer(struct dimmer_app *app) {
+    char *name = strtok(NULL, " \t\r\n");
+    char *layer_str = strtok(NULL, " \t\r\n");
+
+    if (!name || !layer_str) {
+        printf("ERR invalid LAYER arguments\n");
+        fflush(stdout);
+        return;
+    }
+
+    enum zwlr_layer_shell_v1_layer new_layer;
+    if (!parse_layer(layer_str, &new_layer)) {
+        fprintf(stderr, "theater-dimmer: LAYER has no layer '%s'\n", layer_str);
+        printf("ERR unknown layer '%s'\n", layer_str);
+        fflush(stdout);
+        return;
+    }
+
+    struct output_state *out = find_output(app, name);
+    if (!out) {
+        fprintf(stderr, "theater-dimmer: LAYER names unknown output '%s'\n", name);
+        printf("ERR unknown output '%s'\n", name);
+        fflush(stdout);
+        return;
+    }
+
+    /* An unmapped surface picks the layer up at creation; a mapped one is restacked
+     * in place, which needs zwlr_layer_surface_v1.set_layer from version 2. */
+    if (out->layer != new_layer) {
+        out->layer = new_layer;
+        if (out->mapped && out->layer_surface) {
+            if (app->layer_shell_version >= LAYER_SHELL_SET_LAYER_VERSION) {
+                zwlr_layer_surface_v1_set_layer(out->layer_surface, new_layer);
+                wl_surface_commit(out->surface);
+            } else {
+                fprintf(stderr,
+                        "theater-dimmer: cannot restack %s while mapped; '%s' applies on the "
+                        "next theater mode activation\n",
+                        name, layer_to_string(new_layer));
+            }
+        }
+    }
+
+    printf("OK LAYER %s %s\n", name, layer_to_string(out->layer));
+    fflush(stdout);
+}
+
 static void handle_status(struct dimmer_app *app) {
     printf("STATUS {");
     bool first = true;
     for (int i = 0; i < MAX_OUTPUTS; i++) {
         struct output_state *out = &app->outputs[i];
         if (!out->in_use) continue;
-        printf("%s\"%s\":{\"alpha\":%.3f,\"target\":%.3f,\"animating\":%s,\"art\":%s}",
+        printf("%s\"%s\":{\"alpha\":%.3f,\"target\":%.3f,\"animating\":%s,\"art\":%s,\"layer\":\"%s\"}",
                first ? "" : ",", out->name, out->current_alpha, out->target_alpha,
-               out->animating ? "true" : "false", out->art ? "true" : "false");
+               out->animating ? "true" : "false", out->art ? "true" : "false",
+               layer_to_string(out->layer));
         first = false;
     }
     printf("}\n");
@@ -749,6 +860,8 @@ static void handle_command(struct dimmer_app *app, char *line) {
 
     if (strcasecmp(cmd, "ART") == 0) {
         handle_art(app);
+    } else if (strcasecmp(cmd, "LAYER") == 0) {
+        handle_layer(app);
     } else if (strcasecmp(cmd, "DIM") == 0) {
         handle_dim(app);
     } else if (strcasecmp(cmd, "DIM_OUTPUT") == 0) {

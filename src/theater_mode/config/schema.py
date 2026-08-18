@@ -11,9 +11,11 @@ from theater_mode.config.provenance import Layer, Provenance
 # Allowed choices
 VALID_EFFECT_MODES: frozenset[str] = frozenset({"dim", "log"})
 VALID_EASING_CURVES: frozenset[str] = frozenset({"sine", "quad", "cubic", "linear"})
+VALID_PLACEMENTS: frozenset[str] = frozenset({"over_windows", "behind_windows"})
 
 # Defaults
 DEFAULT_EFFECT_MODE = "dim"
+DEFAULT_PLACEMENT = "over_windows"
 DEFAULT_DIM_FACTOR = 0.85
 DEFAULT_ART = True
 
@@ -49,13 +51,20 @@ EFFECT_FIELDS: dict[str, FieldSpec] = {
         allow_in_output=False,
         doc="Display effect to apply to secondary outputs: 'dim' (cinematic overlay) or 'log' (dry run).",
     ),
+    "placement": FieldSpec(
+        key="placement",
+        type_name="string",
+        default=DEFAULT_PLACEMENT,
+        choices=VALID_PLACEMENTS,
+        doc="Where the effect sits: 'over_windows' covers whatever is on the display, blocking its light; 'behind_windows' paints on the desktop behind your open windows, which stay visible and usable.",
+    ),
     "dim_factor": FieldSpec(
         key="dim_factor",
         type_name="float",
         default=DEFAULT_DIM_FACTOR,
         min_value=0.0,
         max_value=1.0,
-        doc="Fraction of secondary display brightness to reduce (0.0 = no dimming, 1.0 = solid black, 0.85 = 15% brightness).",
+        doc="Fraction of brightness to remove (0.0 = untouched, 1.0 = solid black, 0.85 = 15% brightness). With placement 'over_windows' this dims everything on the display; with 'behind_windows' it only darkens what is drawn behind your windows, where a much lower value usually reads better.",
     ),
     "art": FieldSpec(
         key="art",
@@ -123,12 +132,14 @@ class EffectConfig:
     """Resolved global effect settings."""
 
     mode: str = DEFAULT_EFFECT_MODE
+    placement: str = DEFAULT_PLACEMENT
     dim_factor: float = DEFAULT_DIM_FACTOR
     art: bool = DEFAULT_ART
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
+            "placement": self.placement,
             "dim_factor": self.dim_factor,
             "art": self.art,
         }
@@ -168,6 +179,7 @@ class DaemonConfig:
 class OutputOverrideConfig:
     """Per-output overrides for effect and transition leaves."""
 
+    placement: str | None = None
     dim_factor: float | None = None
     art: bool | None = None
     duration: float | None = None
@@ -177,6 +189,7 @@ class OutputOverrideConfig:
         return {
             k: v
             for k, v in {
+                "placement": self.placement,
                 "dim_factor": self.dim_factor,
                 "art": self.art,
                 "duration": self.duration,
@@ -191,10 +204,12 @@ class ResolvedDisplaySettings:
     """Fully resolved settings for a specific physical output."""
 
     output_id: str
+    placement: str
     dim_factor: float
     art: bool
     duration: float
     curve: str
+    matched_key: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,13 +237,14 @@ class ResolvedConfig:
         3. connector name (e.g. 'DP-1')
         4. global resolved defaults
         """
-        override = next(
-            (self.outputs[k] for k in (*match_keys, output_name) if k in self.outputs),
-            OutputOverrideConfig(),
-        )
+        matched_key = next((k for k in (*match_keys, output_name) if k in self.outputs), None)
+        override = self.outputs.get(matched_key) if matched_key else None
+        override = override or OutputOverrideConfig()
 
         return ResolvedDisplaySettings(
             output_id=output_name,
+            matched_key=matched_key,
+            placement=(self.effect.placement if override.placement is None else override.placement),
             dim_factor=(
                 self.effect.dim_factor if override.dim_factor is None else override.dim_factor
             ),

@@ -10,8 +10,13 @@ import subprocess
 from pathlib import Path
 from typing import override
 
-from theater_mode.config import ResolvedConfig, ResolvedDisplaySettings
-from theater_mode.config.schema import DEFAULT_CURVE, DEFAULT_DIM_FACTOR, DEFAULT_DURATION
+from theater_mode.config import ResolvedConfig, ResolvedDisplaySettings, format_table_header
+from theater_mode.config.schema import (
+    DEFAULT_CURVE,
+    DEFAULT_DIM_FACTOR,
+    DEFAULT_DURATION,
+    DEFAULT_PLACEMENT,
+)
 from theater_mode.constants import DIMMER_BINARY_NAME
 from theater_mode.display.drm import output_identities, output_modes
 from theater_mode.display.edid import OutputIdentity
@@ -19,6 +24,10 @@ from theater_mode.effects.base import Effect, EffectOptions
 from theater_mode.steam import build_artwork
 
 log = logging.getLogger("theater-moded")
+
+# The helper speaks Wayland; the config speaks about windows. Translate at the boundary
+# rather than leaking zwlr_layer_shell_v1 vocabulary into a user's config file.
+PLACEMENT_LAYERS = {"over_windows": "overlay", "behind_windows": "bottom"}
 
 
 def find_dimmer_binary() -> Path | None:
@@ -54,6 +63,7 @@ class DimEffect(Effect):
 
     def __init__(
         self,
+        placement: str = DEFAULT_PLACEMENT,
         dim_factor: float = DEFAULT_DIM_FACTOR,
         duration: float = DEFAULT_DURATION,
         curve: str = DEFAULT_CURVE,
@@ -61,6 +71,7 @@ class DimEffect(Effect):
         binary_path: Path | str | None = None,
         resolved_config: ResolvedConfig | None = None,
     ) -> None:
+        self._placement = placement.lower()
         self._dim_factor = dim_factor
         self._duration = duration
         self._curve = curve.lower()
@@ -74,6 +85,7 @@ class DimEffect(Effect):
     @override
     def create(cls, options: EffectOptions) -> DimEffect:
         return cls(
+            placement=options.placement,
             dim_factor=options.dim_factor,
             duration=options.dim_duration,
             curve=options.dim_curve,
@@ -84,6 +96,7 @@ class DimEffect(Effect):
     @override
     def update_options(self, options: EffectOptions) -> None:
         """Update active effect parameters dynamically."""
+        self._placement = options.placement.lower()
         self._dim_factor = options.dim_factor
         self._duration = options.dim_duration
         self._curve = options.dim_curve.lower()
@@ -158,6 +171,7 @@ class DimEffect(Effect):
         if self._resolved_config is None:
             return ResolvedDisplaySettings(
                 output_id=output,
+                placement=self._placement,
                 dim_factor=self._dim_factor,
                 art=self._art,
                 duration=self._duration,
@@ -170,11 +184,45 @@ class DimEffect(Effect):
         )
 
     @staticmethod
+    def layer_command(output: str, placement: str) -> str:
+        """Format the LAYER protocol command for an output."""
+        return f"LAYER {output} {PLACEMENT_LAYERS.get(placement, 'overlay')}"
+
+    @staticmethod
     def art_command(output: str, artwork: Path | None, size: tuple[int, int] | None) -> str:
         """Format the ART protocol command for an output."""
         if artwork is None or size is None:
             return f"ART {output}"
         return f"ART {output} {size[0]} {size[1]} {artwork}"
+
+    def _log_output_rules(
+        self, targets: list[str], settings: dict[str, ResolvedDisplaySettings]
+    ) -> None:
+        """Report the outputs a per-output rule actually changed, and what changed."""
+        globals_ = {
+            "placement": self._placement,
+            "dim_factor": self._dim_factor,
+            "duration": self._duration,
+            "curve": self._curve,
+            "art": self._art,
+        }
+
+        for output in targets:
+            resolved = settings[output]
+            if resolved.matched_key is None:
+                continue
+
+            deltas = [
+                f"{name}={getattr(resolved, name)}"
+                for name, value in globals_.items()
+                if getattr(resolved, name) != value
+            ]
+            log.info(
+                "%s matched %s%s",
+                output,
+                format_table_header(f"outputs.{resolved.matched_key}"),
+                " -> " + ", ".join(deltas) if deltas else " (no change from global settings)",
+            )
 
     @override
     def apply(self, game_output: str, other_outputs: list[str], appid: str) -> None:
@@ -187,12 +235,24 @@ class DimEffect(Effect):
         # Read connector EDID once so [outputs.<make:model:serial>] rules can match.
         identities = output_identities() if self._resolved_config is not None else {}
         settings = {output: self._settings_for(output, identities) for output in targets}
+
+        # Identities carry display serial numbers, so keep the full dump at debug level.
+        if identities and log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "output identities: %s",
+                "; ".join(
+                    f"{name}={' | '.join(identity.match_keys) or 'no EDID'}"
+                    for name, identity in sorted(identities.items())
+                ),
+            )
         # Read the connector modes once, not once per output.
         sizes = output_modes() if any(s.art for s in settings.values()) else {}
 
         with_art: list[str] = []
         for output in targets:
             resolved = settings[output]
+            # Re-sent every time: a helper that has restarted comes back at its default.
+            self._send(self.layer_command(output, resolved.placement))
             size = sizes.get(output) if resolved.art else None
             artwork = (
                 build_artwork(appid, size[0], size[1], resolved.dim_factor)
@@ -223,13 +283,16 @@ class DimEffect(Effect):
             )
 
         log.info(
-            "cinematic dimming on [%s] (factor=%.2f, duration=%.1fs, curve=%s, artwork on: %s)",
+            "cinematic dimming on [%s] (factor=%.2f, duration=%.1fs, curve=%s, placement=%s,"
+            " artwork on: %s)",
             ", ".join(targets),
             self._dim_factor,
             self._duration,
             self._curve,
+            self._placement,
             ", ".join(with_art) or "none",
         )
+        self._log_output_rules(targets, settings)
 
     @override
     def revert(self, immediate: bool = False) -> None:

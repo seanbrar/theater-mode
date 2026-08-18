@@ -63,7 +63,9 @@ class TestDimCommands(DimEffectTestCase):
         self.assertEqual(
             written(self.process),
             [
+                "LAYER DP-2 overlay",
                 "ART DP-2 3840 2160 /cache/art.argb",
+                "LAYER DP-3 overlay",
                 "ART DP-3 1920 1080 /cache/art.argb",
                 "DIM DP-2,DP-3 0.850 2.00 sine",
             ],
@@ -131,7 +133,13 @@ class TestPerOutputSettings(DimEffectTestCase):
 
         self.assertEqual(
             written(self.process),
-            ["ART DP-2", "ART DP-3", "DIM DP-2,DP-3 0.850 2.00 sine"],
+            [
+                "LAYER DP-2 overlay",
+                "ART DP-2",
+                "LAYER DP-3 overlay",
+                "ART DP-3",
+                "DIM DP-2,DP-3 0.850 2.00 sine",
+            ],
         )
 
     def test_per_output_duration_and_curve_are_applied(self) -> None:
@@ -144,6 +152,46 @@ class TestPerOutputSettings(DimEffectTestCase):
         effect.apply("DP-1", ["DP-2"], "1245620")
 
         self.assertIn("DIM_OUTPUT DP-2 0.850 0.50 linear", written(self.process))
+
+    def test_per_output_placement_is_applied(self) -> None:
+        effect = DimEffect(
+            art=False,
+            resolved_config=self.config(
+                **{"DP-2": OutputOverrideConfig(placement="behind_windows")}
+            ),
+        )
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        commands = written(self.process)
+        self.assertIn("LAYER DP-2 bottom", commands)
+        self.assertIn("LAYER DP-3 overlay", commands)
+
+    def test_matched_rule_is_logged_as_a_copy_pasteable_header(self) -> None:
+        self.output_identities.return_value = {
+            "DP-2": parse_edid("DP-2", build_edid(serial_text="AAA1111")),
+        }
+        effect = DimEffect(
+            art=False,
+            resolved_config=self.config(
+                **{"DEL:DELL S2721QS:AAA1111": OutputOverrideConfig(dim_factor=0.4)}
+            ),
+        )
+
+        with self.assertLogs("theater-moded", level="INFO") as logs:
+            effect.apply("DP-1", ["DP-2"], "1245620")
+
+        matched = [line for line in logs.output if "matched" in line]
+        self.assertEqual(len(matched), 1)
+        self.assertIn('[outputs."DEL:DELL S2721QS:AAA1111"]', matched[0])
+        self.assertIn("dim_factor=0.4", matched[0])
+
+    def test_outputs_without_a_rule_are_not_logged(self) -> None:
+        effect = DimEffect(art=False, resolved_config=self.config())
+
+        with self.assertLogs("theater-moded", level="INFO") as logs:
+            effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        self.assertFalse([line for line in logs.output if "matched" in line])
 
     def test_edid_identity_outranks_the_connector_name(self) -> None:
         """Two identical panels must be addressable by serial, not just by port."""
@@ -186,7 +234,9 @@ class TestArtworkHandling(DimEffectTestCase):
         effect = DimEffect(art=False)
         effect.apply("DP-1", ["DP-2"], "1245620")
 
-        self.assertEqual(written(self.process), ["ART DP-2", "DIM DP-2 0.850 2.00 sine"])
+        self.assertEqual(
+            written(self.process), ["LAYER DP-2 overlay", "ART DP-2", "DIM DP-2 0.850 2.00 sine"]
+        )
         self.build_artwork.assert_not_called()
         self.output_modes.assert_not_called()
 
@@ -202,19 +252,27 @@ class TestArtworkHandling(DimEffectTestCase):
         effect = DimEffect()
         effect.apply("DP-1", ["DP-2"], "1245620")
 
-        self.assertEqual(written(self.process), ["ART DP-2", "DIM DP-2 0.850 2.00 sine"])
+        self.assertEqual(
+            written(self.process), ["LAYER DP-2 overlay", "ART DP-2", "DIM DP-2 0.850 2.00 sine"]
+        )
 
     def test_a_missing_appid_clears_artwork(self) -> None:
         effect = DimEffect()
         effect.apply("DP-1", ["DP-2"], "")
 
-        self.assertEqual(written(self.process), ["ART DP-2", "DIM DP-2 0.850 2.00 sine"])
+        self.assertEqual(
+            written(self.process), ["LAYER DP-2 overlay", "ART DP-2", "DIM DP-2 0.850 2.00 sine"]
+        )
         self.build_artwork.assert_not_called()
 
     def test_art_command_formats_path_correctly(self) -> None:
         command = DimEffect.art_command("DP-2", Path("/home/user/.cache/art.argb"), (3840, 2160))
         self.assertEqual(command, "ART DP-2 3840 2160 /home/user/.cache/art.argb")
         self.assertTrue(command.endswith("/home/user/.cache/art.argb"))
+
+    def test_layer_command_translates_placement_to_protocol(self) -> None:
+        self.assertEqual(DimEffect.layer_command("DP-2", "behind_windows"), "LAYER DP-2 bottom")
+        self.assertEqual(DimEffect.layer_command("DP-2", "over_windows"), "LAYER DP-2 overlay")
 
 
 class TestHelperLifecycle(DimEffectTestCase):

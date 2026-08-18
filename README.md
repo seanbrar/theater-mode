@@ -82,6 +82,9 @@ See [`config.reference.toml`](config.reference.toml) for the complete reference 
 # Display effect: 'dim' (cinematic overlay) or 'log' (dry run)
 mode = "dim"
 
+# Where the effect sits: 'over_windows' or 'behind_windows' (see "Placement" below)
+placement = "over_windows"
+
 # Fraction of brightness to reduce (0.0 = no dimming, 1.0 = solid black)
 dim_factor = 0.85
 
@@ -108,13 +111,31 @@ require_fullscreen = false
 # Per-output overrides -- see "Addressing Displays" below
 [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
 dim_factor = 0.50
+placement = "behind_windows"
 art = false
 ```
 
+### Placement
+
+`placement` decides whether the effect sits above or below your open windows:
+
+| Value | Behavior |
+| --- | --- |
+| `over_windows` | Covers everything on the display, blocking its light. Windows on that screen are hidden until the game exits. |
+| `behind_windows` | Paints on the desktop behind your windows, which stay visible and usable. Empty screen area shows the artwork. |
+
+`over_windows` is the default because blocking light is the point of theater mode. Choose
+`behind_windows` for a monitor you still want to read while playing — a chat window or a
+guide stays fully interactive, and the artwork fills whatever the windows don't cover.
+
+The two interact with `dim_factor`. Over windows, `dim_factor` removes light from the whole
+display. Behind windows it only darkens the artwork itself, so the default `0.85` produces a
+very dark wallpaper; something nearer `0.3` usually reads better there.
+
 ### Addressing Displays
 
-Only `dim_factor`, `art`, `duration`, and `curve` can be set per output; `effect.mode` and
-the `[daemon]` keys are global.
+Only `placement`, `dim_factor`, `art`, `duration`, and `curve` can be set per output;
+`effect.mode` and the `[daemon]` keys are global.
 
 An output's identity is read from its EDID over DRM sysfs, so displays can be addressed by
 what they *are* rather than by which port they happen to occupy. Sections are matched in

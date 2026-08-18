@@ -39,6 +39,7 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(len(diagnostics), 0)
         self.assertEqual(config.effect.mode, "dim")
+        self.assertEqual(config.effect.placement, "over_windows")
         self.assertEqual(config.effect.dim_factor, 0.85)
         self.assertTrue(config.effect.art)
         self.assertEqual(config.transition.duration, 2.0)
@@ -108,9 +109,11 @@ duration = 1.0
             """
 [effect]
 dim_factor = 0.80
+placement = "behind_windows"
 
 [outputs.DP-1]
 dim_factor = 0.40
+placement = "over_windows"
 art = false
 
 [outputs."LG:27GL850:1234"]
@@ -129,21 +132,30 @@ dim_factor = 0.95
         # Output with connector match (DP-1)
         dp1 = config.resolve_for_output("DP-1")
         self.assertEqual(dp1.dim_factor, 0.40)
+        self.assertEqual(dp1.placement, "over_windows")
         self.assertFalse(dp1.art)
         self.assertEqual(dp1.curve, "sine")  # global inherited
 
         # Identity match wins over the connector name
         lg = config.resolve_for_output("DP-1", ["LG:27GL850:1234", "LG:27GL850"])
         self.assertEqual(lg.dim_factor, 0.95)
+        self.assertEqual(lg.placement, "behind_windows")  # global inherited
         self.assertTrue(lg.art)  # global inherited
 
         # An identity with no matching rule falls back to the connector name
         fallback = config.resolve_for_output("DP-1", ["Dell Inc.:U2720Q:ABC", "Dell Inc.:U2720Q"])
         self.assertEqual(fallback.dim_factor, 0.40)
+        self.assertEqual(fallback.placement, "over_windows")
+
+        # The winning rule is reported so the daemon can explain itself
+        self.assertEqual(dp1.matched_key, "DP-1")
+        self.assertEqual(lg.matched_key, "LG:27GL850:1234")
 
         # Output without override (HDMI-A-1)
         hdmi = config.resolve_for_output("HDMI-A-1")
+        self.assertIsNone(hdmi.matched_key)
         self.assertEqual(hdmi.dim_factor, 0.80)
+        self.assertEqual(hdmi.placement, "behind_windows")
         self.assertTrue(hdmi.art)
 
     def test_invalid_keys_in_output_produce_diagnostics(self) -> None:
@@ -196,6 +208,7 @@ dim_factor = "missing closing bracket
 [effect]
 dim_factor = 1.50
 mode = "invalid_effect"
+placement = "invalid_placement"
 
 [transition]
 curve = "hyperbolic"
@@ -210,10 +223,11 @@ duration = -5.0
         )
         config, diagnostics = load_resolved_config(dev_config=dev)
 
-        self.assertEqual(len(diagnostics), 4)
+        self.assertEqual(len(diagnostics), 5)
         # Should fallback to defaults
         self.assertEqual(config.effect.dim_factor, 0.85)
         self.assertEqual(config.effect.mode, "dim")
+        self.assertEqual(config.effect.placement, "over_windows")
         self.assertEqual(config.transition.curve, "sine")
         self.assertEqual(config.transition.duration, 2.0)
 
