@@ -64,25 +64,25 @@ class TestDimCommands(DimEffectTestCase):
             written(self.process),
             [
                 "LAYER DP-2 overlay",
-                "ART DP-2 3840 2160 /cache/art.argb",
+                "ART DP-2 1920 1080 /cache/art.argb",
                 "LAYER DP-3 overlay",
                 "ART DP-3 1920 1080 /cache/art.argb",
                 "DIM DP-2,DP-3 0.850 2.00 sine",
             ],
         )
 
-    def test_artwork_is_built_at_each_output_native_size(self) -> None:
+    def test_artwork_buffers_are_capped_at_1080p(self) -> None:
         effect = DimEffect(dim_factor=0.85)
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
 
         self.assertEqual(
             [call.args for call in self.build_artwork.call_args_list],
-            [("1245620", 3840, 2160, 0.85), ("1245620", 1920, 1080, 0.85)],
+            [("1245620", 1920, 1080, 0.85), ("1245620", 1920, 1080, 0.85)],
         )
 
     def test_dim_factor_is_part_of_the_artwork_request(self) -> None:
         DimEffect(dim_factor=0.4).apply("DP-1", ["DP-2"], "1245620")
-        self.assertEqual(self.build_artwork.call_args.args, ("1245620", 3840, 2160, 0.4))
+        self.assertEqual(self.build_artwork.call_args.args, ("1245620", 1920, 1080, 0.4))
 
     def test_revert_fades_out(self) -> None:
         effect = DimEffect(duration=2.0, curve="sine")
@@ -225,7 +225,7 @@ class TestPerOutputSettings(DimEffectTestCase):
 
         self.assertEqual(
             [call.args for call in self.build_artwork.call_args_list],
-            [("1245620", 3840, 2160, 0.85), ("1245620", 1920, 1080, 0.4)],
+            [("1245620", 1920, 1080, 0.85), ("1245620", 1920, 1080, 0.4)],
         )
 
 

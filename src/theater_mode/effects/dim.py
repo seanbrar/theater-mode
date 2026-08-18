@@ -21,7 +21,7 @@ from theater_mode.constants import DIMMER_BINARY_NAME
 from theater_mode.display.drm import output_identities, output_modes
 from theater_mode.display.edid import OutputIdentity
 from theater_mode.effects.base import Effect, EffectOptions
-from theater_mode.steam import build_artwork
+from theater_mode.steam import artwork_render_size, build_artwork
 
 log = logging.getLogger("theater-moded")
 
@@ -253,13 +253,14 @@ class DimEffect(Effect):
             resolved = settings[output]
             # Re-sent every time: a helper that has restarted comes back at its default.
             self._send(self.layer_command(output, resolved.placement))
-            size = sizes.get(output) if resolved.art else None
+            output_size = sizes.get(output) if resolved.art else None
+            render_size = artwork_render_size(*output_size) if output_size else None
             artwork = (
-                build_artwork(appid, size[0], size[1], resolved.dim_factor)
-                if appid and size
+                build_artwork(appid, *render_size, resolved.dim_factor)
+                if appid and render_size
                 else None
             )
-            self._send(self.art_command(output, artwork, size))
+            self._send(self.art_command(output, artwork, render_size))
             if artwork is not None:
                 with_art.append(output)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from theater_mode.config import get_dev_config
 from theater_mode.constants import (
@@ -16,6 +17,10 @@ from theater_mode.constants import (
 from theater_mode.utils import read_process_cmdline, read_process_environ
 
 log = logging.getLogger("theater-moded")
+
+ARTWORK_CACHE_VERSION = 2
+ARTWORK_MAX_WIDTH = 1920
+ARTWORK_MAX_HEIGHT = 1080
 
 
 def steam_appid_for_window(resource_class: str, pid: int) -> str | None:
@@ -67,6 +72,30 @@ def find_hero_art(appid: str) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_size)
 
 
+def artwork_render_size(width: int, height: int) -> tuple[int, int]:
+    """Fit an output inside the artwork buffer limit without changing its aspect ratio."""
+    scale = min(1.0, ARTWORK_MAX_WIDTH / width, ARTWORK_MAX_HEIGHT / height)
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def _fast_feather_mask(width: int, height: int, feather: int, *, horizontal: bool = False) -> Any:
+    """Generate a feather mask from a single gradient row or column."""
+    from PIL import Image
+
+    length = width if horizontal else height
+    gradient = bytearray(length)
+    denominator = max(1, feather - 1)
+    for position in range(feather):
+        gradient[position] = int(255 * position / denominator)
+    gradient[feather : length - feather] = b"\xff" * (length - 2 * feather)
+    for position in range(feather):
+        gradient[length - feather + position] = int(255 * (feather - 1 - position) / denominator)
+
+    strip_size = (length, 1) if horizontal else (1, length)
+    strip = Image.frombytes("L", strip_size, bytes(gradient))
+    return strip.resize((width, height), Image.Resampling.NEAREST)
+
+
 def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Path | None:
     """Generate and cache a raw ARGB8888 composite from Steam hero art at target resolution.
 
@@ -77,46 +106,68 @@ def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Pat
     if source is None:
         return None
 
-    brightness = max(0.0, min(1.0, 1.0 - dim_factor))
-    target = ART_CACHE / f"{appid}-{width}x{height}-d{round(dim_factor * 100):03d}.argb"
+    dim_millis = round(max(0.0, min(1.0, dim_factor)) * 1000)
+    brightness = 1.0 - dim_millis / 1000
+    target = ART_CACHE / f"{appid}-v{ARTWORK_CACHE_VERSION}-{width}x{height}-d{dim_millis:04d}.argb"
     if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
         return target
 
     try:
         from PIL import Image, ImageEnhance, ImageFilter
 
-        with Image.open(source) as hero:
-            hero = hero.convert("RGB")
+        with Image.open(source) as artwork:
+            artwork = artwork.convert("RGB")
+            src_w, src_h = artwork.width, artwork.height
 
-            # Backdrop: Fill screen dimensions, apply gaussian blur and ambient darkening
-            scale = max(width / hero.width, height / hero.height)
-            backdrop = hero.resize(
-                (max(1, round(hero.width * scale)), max(1, round(hero.height * scale))),
-                Image.LANCZOS,
-            )
-            left = (backdrop.width - width) // 2
-            top = (backdrop.height - height) // 2
-            backdrop = backdrop.crop((left, top, left + width, top + height))
-            backdrop = backdrop.filter(ImageFilter.GaussianBlur(radius=max(8, width // 60)))
-            backdrop = ImageEnhance.Brightness(backdrop).enhance(0.45)
+            # Backdrop: Determine source crop bounding box in source coordinates
+            target_ar = width / height
+            src_ar = src_w / src_h
+            if src_ar > target_ar:
+                crop_w = round(src_h * target_ar)
+                crop_left = (src_w - crop_w) // 2
+                crop_box = (crop_left, 0, crop_left + crop_w, src_h)
+            else:
+                crop_h = round(src_w / target_ar)
+                crop_top = (src_h - crop_h) // 2
+                crop_box = (0, crop_top, src_w, crop_top + crop_h)
 
-            # Foreground: Centered hero art with feathered edge gradient mask
-            fg_height = max(1, round(hero.height * (width / hero.width)))
-            foreground = hero.resize((width, fg_height), Image.LANCZOS)
-            foreground = ImageEnhance.Brightness(foreground).enhance(0.75)
+            # Downscaled backdrop: Resize cropped source to 1/8 scale and blur
+            downscale = 8
+            low_w = max(1, width // downscale)
+            low_h = max(1, height // downscale)
+            backdrop_low = artwork.resize((low_w, low_h), Image.Resampling.BILINEAR, box=crop_box)
+            blur_radius = max(2, (width // 60) // downscale)
+            backdrop_low = backdrop_low.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+            backdrop_low = ImageEnhance.Brightness(backdrop_low).enhance(0.45 * brightness)
 
-            feather = max(1, min(fg_height // 4, (height - fg_height) // 2 + fg_height // 8))
-            mask = Image.new("L", (width, fg_height), 255)
-            fade = Image.linear_gradient("L").resize((width, feather))
-            mask.paste(fade.transpose(Image.FLIP_TOP_BOTTOM).point(lambda v: 255 - v), (0, 0))
-            mask.paste(fade.point(lambda v: 255 - v), (0, fg_height - feather))
+            # Upscale blurred backdrop to target dimensions
+            backdrop = backdrop_low.resize((width, height), Image.Resampling.BILINEAR)
+            del backdrop_low
 
-            backdrop.paste(foreground, (0, (height - fg_height) // 2), mask)
-            backdrop = ImageEnhance.Brightness(backdrop).enhance(brightness)
+            # Foreground: Contain the complete artwork and feather the exposed axis
+            artwork_dimmed = ImageEnhance.Brightness(artwork).enhance(0.75 * brightness)
+            fg_scale = min(width / src_w, height / src_h)
+            fg_width = max(1, round(src_w * fg_scale))
+            fg_height = max(1, round(src_h * fg_scale))
+            foreground = artwork_dimmed.resize((fg_width, fg_height), Image.Resampling.LANCZOS)
+            del artwork_dimmed
+
+            mask = None
+            if fg_width < width:
+                feather = max(1, min(fg_width // 4, (width - fg_width) // 2 + fg_width // 8))
+                mask = _fast_feather_mask(fg_width, fg_height, feather, horizontal=True)
+            elif fg_height < height:
+                feather = max(1, min(fg_height // 4, (height - fg_height) // 2 + fg_height // 8))
+                mask = _fast_feather_mask(fg_width, fg_height, feather)
+
+            position = ((width - fg_width) // 2, (height - fg_height) // 2)
+            backdrop.paste(foreground, position, mask)
+            del foreground, mask
 
             raw = backdrop.convert("RGBA").tobytes("raw", "BGRA")
 
             ART_CACHE.mkdir(parents=True, exist_ok=True)
+            # Generation is synchronous, so one reusable sibling keeps crash debris bounded.
             tmp = target.with_suffix(".tmp")
             tmp.write_bytes(raw)
             tmp.replace(target)

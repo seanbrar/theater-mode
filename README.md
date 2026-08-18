@@ -205,7 +205,7 @@ Desktop shells and Steam client processes (such as `steamwebhelper` and `plasmas
 
 When enabled, `theater-mode` locates cached Steam library hero artwork at `~/.local/share/Steam/appcache/librarycache/<appid>/**/library_hero.jpg`.
 
-* **Compositing**: The hero image is centered over a blurred, ambient backdrop sized to the target display's native resolution and feathered at the seams.
+* **Compositing**: The hero image is centered over a blurred, ambient backdrop and feathered at the seams. Artwork buffers are capped at 1920×1080 and scaled to the output by the Wayland compositor.
 * **Brightness**: `dim_factor` is applied directly to the image brightness during rendering so artwork darkens naturally.
 * **Caching**: Generated raw frames are cached in `~/.cache/theater-mode/` per AppID and resolution.
 * **Direct Mapping**: Raw premultiplied ARGB8888 frames are passed directly to `theater-dimmer` and mapped via `wl_shm` without image decoding in the display loop.
