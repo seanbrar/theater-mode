@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import override
 
 from theater_mode.effects.base import Effect
 
@@ -14,6 +15,7 @@ class LogEffect(Effect):
 
     name = "log"
 
+    @override
     def apply(self, game_output: str, other_outputs: list[str], appid: str) -> None:
         log.info(
             "DRY RUN: would apply theater mode for appid %s — game on %s, would affect %s",
@@ -22,5 +24,6 @@ class LogEffect(Effect):
             ", ".join(other_outputs) or "(no other outputs)",
         )
 
+    @override
     def revert(self, immediate: bool = False) -> None:
         log.info("DRY RUN: would revert theater mode")

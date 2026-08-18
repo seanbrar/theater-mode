@@ -7,6 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from tests.test_edid import build_edid
+from theater_mode.config import (
+    EffectConfig,
+    OutputOverrideConfig,
+    ResolvedConfig,
+    TransitionConfig,
+)
+from theater_mode.display.edid import parse_edid
 from theater_mode.effects.dim import DimEffect, find_dimmer_binary
 
 
@@ -35,6 +43,10 @@ class DimEffectTestCase(unittest.TestCase):
             patcher = patch(target, return_value=value)
             setattr(self, target.rsplit(".", 1)[1], patcher.start())
             self.addCleanup(patcher.stop)
+
+        identities = patch("theater_mode.effects.dim.output_identities", return_value={})
+        self.output_identities = identities.start()
+        self.addCleanup(identities.stop)
 
         popen = patch("theater_mode.effects.dim.subprocess.Popen", return_value=self.process)
         self.popen = popen.start()
@@ -89,6 +101,84 @@ class TestDimCommands(DimEffectTestCase):
     def test_apply_with_no_secondary_outputs_reverts(self) -> None:
         DimEffect().apply("DP-1", [], "1245620")
         self.popen.assert_not_called()
+
+
+class TestPerOutputSettings(DimEffectTestCase):
+    def config(self, **overrides: OutputOverrideConfig) -> ResolvedConfig:
+        return ResolvedConfig(
+            effect=EffectConfig(dim_factor=0.85, art=False),
+            transition=TransitionConfig(duration=2.0, curve="sine"),
+            outputs=dict(overrides),
+        )
+
+    def test_every_output_stays_in_the_dimmed_set(self) -> None:
+        """A per-output override must not fade the other secondary displays back out."""
+        effect = DimEffect(
+            art=False,
+            resolved_config=self.config(**{"DP-3": OutputOverrideConfig(dim_factor=0.4)}),
+        )
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        commands = written(self.process)
+        # A single batched DIM selects both outputs, then only DP-3 is retuned.
+        self.assertIn("DIM DP-2,DP-3 0.850 2.00 sine", commands)
+        self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)
+        self.assertNotIn("DIM DP-3 0.400 2.00 sine", commands)
+
+    def test_outputs_matching_the_globals_are_not_retuned(self) -> None:
+        effect = DimEffect(art=False, resolved_config=self.config())
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        self.assertEqual(
+            written(self.process),
+            ["ART DP-2", "ART DP-3", "DIM DP-2,DP-3 0.850 2.00 sine"],
+        )
+
+    def test_per_output_duration_and_curve_are_applied(self) -> None:
+        effect = DimEffect(
+            art=False,
+            resolved_config=self.config(
+                **{"DP-2": OutputOverrideConfig(duration=0.5, curve="linear")}
+            ),
+        )
+        effect.apply("DP-1", ["DP-2"], "1245620")
+
+        self.assertIn("DIM_OUTPUT DP-2 0.850 0.50 linear", written(self.process))
+
+    def test_edid_identity_outranks_the_connector_name(self) -> None:
+        """Two identical panels must be addressable by serial, not just by port."""
+        self.output_identities.return_value = {
+            "DP-2": parse_edid("DP-2", build_edid(serial_text="AAA1111")),
+            "DP-3": parse_edid("DP-3", build_edid(serial_text="BBB2222")),
+        }
+        effect = DimEffect(
+            art=False,
+            resolved_config=self.config(
+                **{
+                    "DEL:DELL S2721QS:BBB2222": OutputOverrideConfig(dim_factor=0.4),
+                    "DP-2": OutputOverrideConfig(dim_factor=0.7),
+                }
+            ),
+        )
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        commands = written(self.process)
+        self.assertIn("DIM_OUTPUT DP-2 0.700 2.00 sine", commands)  # connector rule
+        self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)  # identity rule
+
+    def test_per_output_dim_factor_reaches_the_artwork(self) -> None:
+        effect = DimEffect(
+            resolved_config=ResolvedConfig(
+                effect=EffectConfig(dim_factor=0.85, art=True),
+                outputs={"DP-3": OutputOverrideConfig(dim_factor=0.4)},
+            )
+        )
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        self.assertEqual(
+            [call.args for call in self.build_artwork.call_args_list],
+            [("1245620", 3840, 2160, 0.85), ("1245620", 1920, 1080, 0.4)],
+        )
 
 
 class TestArtworkHandling(DimEffectTestCase):

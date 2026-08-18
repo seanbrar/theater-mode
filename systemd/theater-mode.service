@@ -5,26 +5,9 @@ After=plasma-workspace.target
 
 [Service]
 Type=simple
-# Configure overrides via drop-in:
-#   systemctl --user edit theater-mode.service
-Environment=THEATER_EFFECT=log
-Environment=THEATER_DIM_FACTOR=0.85
-Environment=THEATER_DIM_DURATION=2.0
-Environment=THEATER_DIM_CURVE=sine
-Environment=THEATER_ART=--art
-Environment=THEATER_REVERT_DELAY=3
-Environment=THEATER_STAGE_DELAY=1.5
-# Unbraced variables expand to no arguments when empty:
-Environment=THEATER_VERBOSE=
-ExecStart=%h/.local/bin/theater-moded \
-    --effect ${THEATER_EFFECT} \
-    --dim-factor ${THEATER_DIM_FACTOR} \
-    --dim-duration ${THEATER_DIM_DURATION} \
-    --dim-curve ${THEATER_DIM_CURVE} \
-    $THEATER_ART \
-    --revert-delay ${THEATER_REVERT_DELAY} \
-    --stage-delay ${THEATER_STAGE_DELAY} \
-    $THEATER_VERBOSE
+# All settings live in ~/.config/theater-mode/config.toml.
+# Inspect or change them with `theater-mode config show` / `theater-mode config set`.
+ExecStart=%h/.local/bin/theater-moded
 Restart=on-failure
 RestartSec=5
 Slice=session.slice

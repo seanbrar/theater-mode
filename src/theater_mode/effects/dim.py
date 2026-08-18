@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import override
 
-from theater_mode.constants import (
-    DEFAULT_DIM_CURVE,
-    DEFAULT_DIM_DURATION,
-    DEFAULT_DIM_FACTOR,
-    DIMMER_BINARY_NAME,
-)
-from theater_mode.display.drm import output_modes
+from theater_mode.config import ResolvedConfig, ResolvedDisplaySettings
+from theater_mode.config.schema import DEFAULT_CURVE, DEFAULT_DIM_FACTOR, DEFAULT_DURATION
+from theater_mode.constants import DIMMER_BINARY_NAME
+from theater_mode.display.drm import output_identities, output_modes
+from theater_mode.display.edid import OutputIdentity
 from theater_mode.effects.base import Effect, EffectOptions
 from theater_mode.steam import build_artwork
 
@@ -55,27 +55,40 @@ class DimEffect(Effect):
     def __init__(
         self,
         dim_factor: float = DEFAULT_DIM_FACTOR,
-        duration: float = DEFAULT_DIM_DURATION,
-        curve: str = DEFAULT_DIM_CURVE,
+        duration: float = DEFAULT_DURATION,
+        curve: str = DEFAULT_CURVE,
         art: bool = True,
         binary_path: Path | str | None = None,
+        resolved_config: ResolvedConfig | None = None,
     ) -> None:
         self._dim_factor = dim_factor
         self._duration = duration
         self._curve = curve.lower()
         self._art = art
         self._custom_binary = Path(binary_path) if binary_path else None
+        self._resolved_config = resolved_config
         self._process: subprocess.Popen[str] | None = None
         self._dimmed = False
 
     @classmethod
+    @override
     def create(cls, options: EffectOptions) -> DimEffect:
         return cls(
             dim_factor=options.dim_factor,
             duration=options.dim_duration,
             curve=options.dim_curve,
             art=options.art,
+            resolved_config=options.resolved_config,
         )
+
+    @override
+    def update_options(self, options: EffectOptions) -> None:
+        """Update active effect parameters dynamically."""
+        self._dim_factor = options.dim_factor
+        self._duration = options.dim_duration
+        self._curve = options.dim_curve.lower()
+        self._art = options.art
+        self._resolved_config = options.resolved_config
 
     def _ensure_process(self) -> bool:
         """Ensure the theater-dimmer helper subprocess is running."""
@@ -112,11 +125,9 @@ class DimEffect(Effect):
         """Close the helper process stdin and release the handle."""
         if self._process is None:
             return
-        try:
-            if self._process.stdin:
+        if self._process.stdin:
+            with contextlib.suppress(OSError):
                 self._process.stdin.close()
-        except OSError:
-            pass
         self._process.poll()
         self._process = None
 
@@ -140,11 +151,23 @@ class DimEffect(Effect):
             log.error("failed writing to dimmer helper: %s", exc)
             return False
 
-    def artwork_for(self, appid: str, size: tuple[int, int] | None) -> Path | None:
-        """Build this game's artwork for one output size, or None if unavailable."""
-        if not self._art or not appid or size is None:
-            return None
-        return build_artwork(appid, size[0], size[1], self._dim_factor)
+    def _settings_for(
+        self, output: str, identities: dict[str, OutputIdentity]
+    ) -> ResolvedDisplaySettings:
+        """Resolve this output's settings, falling back to the flat constructor values."""
+        if self._resolved_config is None:
+            return ResolvedDisplaySettings(
+                output_id=output,
+                dim_factor=self._dim_factor,
+                art=self._art,
+                duration=self._duration,
+                curve=self._curve,
+            )
+
+        identity = identities.get(output)
+        return self._resolved_config.resolve_for_output(
+            output, identity.match_keys if identity else ()
+        )
 
     @staticmethod
     def art_command(output: str, artwork: Path | None, size: tuple[int, int] | None) -> str:
@@ -153,6 +176,7 @@ class DimEffect(Effect):
             return f"ART {output}"
         return f"ART {output} {size[0]} {size[1]} {artwork}"
 
+    @override
     def apply(self, game_output: str, other_outputs: list[str], appid: str) -> None:
         if not other_outputs:
             log.info("no secondary outputs to dim")
@@ -160,16 +184,43 @@ class DimEffect(Effect):
             return
 
         targets = sorted(other_outputs)
+        # Read connector EDID once so [outputs.<make:model:serial>] rules can match.
+        identities = output_identities() if self._resolved_config is not None else {}
+        settings = {output: self._settings_for(output, identities) for output in targets}
         # Read the connector modes once, not once per output.
-        sizes = output_modes() if self._art else {}
+        sizes = output_modes() if any(s.art for s in settings.values()) else {}
 
         with_art: list[str] = []
         for output in targets:
-            size = sizes.get(output)
-            artwork = self.artwork_for(appid, size)
+            resolved = settings[output]
+            size = sizes.get(output) if resolved.art else None
+            artwork = (
+                build_artwork(appid, size[0], size[1], resolved.dim_factor)
+                if appid and size
+                else None
+            )
             self._send(self.art_command(output, artwork, size))
             if artwork is not None:
                 with_art.append(output)
+
+        # One batched DIM selects the dimmed set: listed outputs animate to the global
+        # values and every other output fades out. Outputs whose resolved settings differ
+        # are then retuned individually, which leaves the rest of the set untouched.
+        joined = ",".join(targets)
+        batched = f"DIM {joined} {self._dim_factor:.3f} {self._duration:.2f} {self._curve}"
+        if not self._send(batched):
+            return
+        self._dimmed = True
+
+        globals_ = (self._dim_factor, self._duration, self._curve)
+        for output in targets:
+            resolved = settings[output]
+            if (resolved.dim_factor, resolved.duration, resolved.curve) == globals_:
+                continue
+            self._send(
+                f"DIM_OUTPUT {output} {resolved.dim_factor:.3f}"
+                f" {resolved.duration:.2f} {resolved.curve}"
+            )
 
         log.info(
             "cinematic dimming on [%s] (factor=%.2f, duration=%.1fs, curve=%s, artwork on: %s)",
@@ -180,10 +231,7 @@ class DimEffect(Effect):
             ", ".join(with_art) or "none",
         )
 
-        joined = ",".join(targets)
-        if self._send(f"DIM {joined} {self._dim_factor:.3f} {self._duration:.2f} {self._curve}"):
-            self._dimmed = True
-
+    @override
     def revert(self, immediate: bool = False) -> None:
         if not self._dimmed and not self._running():
             return

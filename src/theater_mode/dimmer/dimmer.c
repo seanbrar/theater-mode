@@ -9,6 +9,11 @@
  *   ART <output> <width> <height> <path>   Stage artwork for an output
  *   ART <output>                           Clear staged artwork (revert to black)
  *   DIM <outputs_comma_separated> <target_alpha> <duration_sec> [easing]
+ *                                          Select the dimmed set: listed outputs
+ *                                          animate to target_alpha, all others fade out
+ *   DIM_OUTPUT <output> <target_alpha> <duration_sec> [easing]
+ *                                          Retune one already-selected output without
+ *                                          disturbing the rest of the dimmed set
  *   FADE_OUT <duration_sec> [easing]
  *   STATUS
  *   QUIT
@@ -673,6 +678,37 @@ static void handle_dim(struct dimmer_app *app) {
     fflush(stdout);
 }
 
+static void handle_dim_output(struct dimmer_app *app) {
+    char *name = strtok(NULL, " \t\r\n");
+    char *alpha_str = strtok(NULL, " \t\r\n");
+    char *duration_str = strtok(NULL, " \t\r\n");
+    char *easing_str = strtok(NULL, " \t\r\n");
+
+    if (!name || !alpha_str) {
+        printf("ERR invalid DIM_OUTPUT arguments\n");
+        fflush(stdout);
+        return;
+    }
+
+    struct output_state *out = find_output(app, name);
+    if (!out) {
+        printf("ERR DIM_OUTPUT names unknown output '%s'\n", name);
+        fflush(stdout);
+        return;
+    }
+
+    double target_alpha = atof(alpha_str);
+    double duration_sec = duration_str ? atof(duration_str) : 1.5;
+    enum easing_curve easing = parse_easing(easing_str);
+
+    /* Staged artwork has dim factor pre-applied; flat black uses target alpha. */
+    start_animation(app, out, out->art ? 1.0 : target_alpha, duration_sec, easing);
+
+    printf("OK DIM_OUTPUT %s alpha=%.2f duration=%.2fs easing=%s\n",
+           name, target_alpha, duration_sec, easing_to_string(easing));
+    fflush(stdout);
+}
+
 static void handle_fade_out(struct dimmer_app *app) {
     char *duration_str = strtok(NULL, " \t\r\n");
     char *easing_str = strtok(NULL, " \t\r\n");
@@ -715,6 +751,8 @@ static void handle_command(struct dimmer_app *app, char *line) {
         handle_art(app);
     } else if (strcasecmp(cmd, "DIM") == 0) {
         handle_dim(app);
+    } else if (strcasecmp(cmd, "DIM_OUTPUT") == 0) {
+        handle_dim_output(app);
     } else if (strcasecmp(cmd, "FADE_OUT") == 0) {
         handle_fade_out(app);
     } else if (strcasecmp(cmd, "STATUS") == 0) {

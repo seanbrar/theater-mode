@@ -10,7 +10,7 @@ This guide outlines our development workflow, coding standards, and commit messa
 
 ### Prerequisites
 
-* **Python 3.10+** with `PyGObject` bindings (`python3-gobject` or `pygobject`)
+* **Python 3.12+** with `PyGObject` bindings (`python3-gobject` or `pygobject`)
 * **Pillow** (`python3-pillow`) — optional, needed for game artwork
 * **A C compiler, `make`, and libwayland** (`wayland-devel` / `libwayland-dev`) to build the dimmer
 * **KDE Plasma 6 on Wayland**
@@ -50,14 +50,25 @@ You can also install `bin/check` as a git pre-commit hook:
 ln -sf ../../bin/check .git/hooks/pre-commit
 ```
 
+### Developer Environment Variables (Dev Keys)
+
+Dev keys are settable **only via environment variables** and are reserved for development, test fixtures, and debugging:
+
+| Environment Variable | Description |
+| --- | --- |
+| `THEATER_DEV_CONFIG_OVERRIDE` | Path to a replacement user configuration file (replaces the user layer entirely for tests). |
+| `THEATER_DEV_SYSTEM_CONFIG_OVERRIDE` | Path to a replacement system configuration file. |
+| `THEATER_DEV_FORCE_ART_DIR` | Path to a custom Steam library cache directory for artwork testing. |
+| `THEATER_DEV_VERBOSE` | Enable verbose debug logging in daemon. |
+
 ---
 
 ## 2. Code Standards
 
-* **Modern Python**: Target Python 3.10+. Every Python file should begin with `from __future__ import annotations`.
+* **Modern Python**: Target Python 3.12+. Every Python file should begin with `from __future__ import annotations`.
 * **Type Annotations**: Provide explicit type hints for all function signatures and class attributes.
 * **Docstrings**: Follow PEP 257 format (`"""Single-line summary."""` or summary followed by blank line and detailed notes).
-* **Formatting & Linting**: We use [Ruff](pyproject.toml) configured for 100-character line lengths and sorted imports (`isort`). Run `ruff format .` and `ruff check --fix .` to format code automatically.
+* **Formatting & Linting**: We use [Ruff](pyproject.toml) configured for 100-character line lengths and sorted imports (`isort`). Run `ruff format .` and `ruff check --fix .` to format code automatically. `bin/check` uses a system `ruff` when present and otherwise falls back to `uvx ruff`, so either installation works; `uv` is development tooling only and is never required by `install.sh` or at runtime.
 * **Modularity**: Keep hardware I/O (DRM sysfs, the dimmer helper, D-Bus) isolated from state tracking and heuristics so logic remains unit-testable without a physical compositor.
 
 ---

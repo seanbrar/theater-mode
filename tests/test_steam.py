@@ -43,9 +43,11 @@ class TestSteamDetection(unittest.TestCase):
         self.assertEqual(steam_appid_for_window("gamescope", 400), "1145360")
 
     def test_unidentified_window(self) -> None:
-        with patch("theater_mode.steam.read_process_environ", return_value={}):
-            with patch("theater_mode.steam.read_process_cmdline", return_value=""):
-                self.assertIsNone(steam_appid_for_window("firefox", 500))
+        with (
+            patch("theater_mode.steam.read_process_environ", return_value={}),
+            patch("theater_mode.steam.read_process_cmdline", return_value=""),
+        ):
+            self.assertIsNone(steam_appid_for_window("firefox", 500))
 
 
 class TestArtwork(unittest.TestCase):

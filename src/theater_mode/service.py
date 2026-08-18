@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable
 
@@ -32,36 +33,56 @@ def make_handler(daemon: Daemon) -> Callable:
     ) -> None:
         try:
             args = params.unpack() if params is not None else ()
-            if method == "WindowOpened":
-                daemon.window_opened(*args)
-            elif method == "WindowChanged":
-                daemon.window_changed(*args)
-            elif method == "WindowClosed":
-                daemon.window_closed(*args)
-            elif method == "SnapshotBegin":
-                daemon.snapshot_begin()
-            elif method == "SnapshotEnd":
-                daemon.snapshot_end()
-            elif method == "Status":
-                invocation.return_value(GLib.Variant("(s)", (daemon.status(),)))
-                return
-            elif method == "Simulate":
-                invocation.return_value(GLib.Variant("(s)", (daemon.simulate(*args),)))
-                return
-            elif method == "Clear":
-                invocation.return_value(GLib.Variant("(s)", (daemon.clear(),)))
-                return
-            else:
-                invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)
-                return
+            match method:
+                case "WindowOpened":
+                    daemon.window_opened(*args)
+                case "WindowChanged":
+                    daemon.window_changed(*args)
+                case "WindowClosed":
+                    daemon.window_closed(*args)
+                case "SnapshotBegin":
+                    daemon.snapshot_begin()
+                case "SnapshotEnd":
+                    daemon.snapshot_end()
+                case "Status":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.status(),)))
+                    return
+                case "Simulate":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.simulate(*args),)))
+                    return
+                case "Clear":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.clear(),)))
+                    return
+                case "GetOutputs":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.get_outputs(),)))
+                    return
+                case "GetResolved":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.get_resolved(),)))
+                    return
+                case "GetDiagnostics":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.get_diagnostics(),)))
+                    return
+                case "Preview":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.preview(*args),)))
+                    return
+                case "RevertPreview":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.revert_preview(),)))
+                    return
+                case "Commit":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.commit(*args),)))
+                    return
+                case "Reload":
+                    invocation.return_value(GLib.Variant("(s)", (daemon.reload(),)))
+                    return
+                case _:
+                    invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)
+                    return
 
             invocation.return_value(None)
         except Exception:
             # Prevent unhandled exceptions in individual window events from terminating the daemon
             log.exception("error handling D-Bus method %s", method)
-            try:
+            with contextlib.suppress(Exception):
                 invocation.return_dbus_error(f"{INTERFACE}.Failed", f"{method} failed")
-            except Exception:
-                pass
 
     return handle_call

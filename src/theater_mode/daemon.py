@@ -4,17 +4,27 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 import gi
 
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib  # noqa: E402
 
-from theater_mode.display.drm import connected_outputs
-from theater_mode.effects.base import Effect
-from theater_mode.steam import steam_appid_for_window
-from theater_mode.utils import parse_bool, parse_int
+from theater_mode.config import (  # noqa: E402
+    DevConfig,
+    Diagnostic,
+    ResolvedConfig,
+    commit_user_config,
+    load_resolved_config,
+    validate_updates,
+)
+from theater_mode.display.drm import connected_outputs, output_identities  # noqa: E402
+from theater_mode.effects.base import Effect, EffectOptions  # noqa: E402
+from theater_mode.steam import steam_appid_for_window  # noqa: E402
+from theater_mode.utils import parse_bool, parse_int  # noqa: E402
 
 log = logging.getLogger("theater-moded")
 
@@ -36,20 +46,44 @@ class TrackedWindow:
         return self.appid is not None
 
 
-@dataclass
 class Daemon:
     """Core state machine managing window lifecycle and display effects."""
 
-    effect: Effect
-    require_fullscreen: bool = False
-    revert_delay: float = 3.0
-    stage_delay: float = 1.5
-    windows: dict[str, TrackedWindow] = field(default_factory=dict)
-    active_output: str | None = None
-    _applied_others: list[str] | None = None
-    _snapshot: set[str] | None = None
-    _pending_revert: int | None = None
-    _pending_stage: int | None = None
+    def __init__(
+        self,
+        effect: Effect,
+        config: ResolvedConfig | None = None,
+        diagnostics: list[Diagnostic] | None = None,
+        dev_config: DevConfig | None = None,
+        on_config_changed: Callable[[], None] | None = None,
+    ) -> None:
+        self.effect = effect
+        self.config = config or ResolvedConfig()
+        self.diagnostics = diagnostics or []
+        self.dev_config = dev_config
+        self.on_config_changed = on_config_changed
+        self.windows: dict[str, TrackedWindow] = {}
+        self.active_output: str | None = None
+        self._applied_others: list[str] | None = None
+        self._snapshot: set[str] | None = None
+        self._pending_revert: int | None = None
+        self._pending_stage: int | None = None
+        self._session_overrides: dict[str, Any] = {}
+
+        # Sync effect options on startup
+        self.effect.update_options(EffectOptions.from_config(self.config))
+
+    @property
+    def require_fullscreen(self) -> bool:
+        return self.config.daemon.require_fullscreen
+
+    @property
+    def revert_delay(self) -> float:
+        return self.config.daemon.revert_delay
+
+    @property
+    def stage_delay(self) -> float:
+        return self.config.daemon.stage_delay
 
     # -- State Machine & Lifecycle -----------------------------------------
 
@@ -314,3 +348,132 @@ class Daemon:
         self.effect.cancel_pending()
         self._revert_now(immediate=immediate)
         return "cleared"
+
+    # -- Configuration API Handlers ----------------------------------------
+
+    def get_outputs(self) -> str:
+        """Return each connected output with the config keys that would address it."""
+        identities = output_identities()
+        return json.dumps(
+            [
+                {
+                    "connector": name,
+                    "vendor": identity.vendor,
+                    "pnp_id": identity.pnp_id,
+                    "model": identity.model,
+                    "serial": identity.serial,
+                    "match_keys": list(identity.match_keys),
+                    "active": name == self.active_output,
+                }
+                for name, identity in sorted(identities.items())
+            ],
+            indent=2,
+        )
+
+    def get_resolved(self) -> str:
+        """Return JSON dump of full resolved configuration with provenance."""
+        return json.dumps(self.config.to_dict(), indent=2)
+
+    def get_diagnostics(self) -> str:
+        """Return JSON list of all configuration diagnostics and warnings."""
+        return json.dumps([d.to_dict() for d in self.diagnostics], indent=2)
+
+    @staticmethod
+    def _parse_updates(keys_json: str, action: str) -> dict[str, Any] | str:
+        """Decode a {key path: value} payload, or return an error string for the caller."""
+        try:
+            updates = json.loads(keys_json)
+        except json.JSONDecodeError as e:
+            return f"error: invalid JSON payload: {e}"
+        if not isinstance(updates, dict):
+            return f"error: {action} payload must be a JSON object mapping keys to values"
+        return updates
+
+    def preview(self, keys_json: str) -> str:
+        """Apply in-memory session overrides without writing to disk."""
+        updates = self._parse_updates(keys_json, "preview")
+        if isinstance(updates, str):
+            return updates
+
+        accepted, rejected = validate_updates(updates)
+        self._session_overrides.update(accepted)
+        self._reload_internal()
+        log.info("applied session preview for %d keys", len(accepted))
+        return self._report(f"preview applied for {len(accepted)} keys", rejected)
+
+    def revert_preview(self) -> str:
+        """Discard in-memory session overrides and revert to resolved disk configuration."""
+        count = len(self._session_overrides)
+        self._session_overrides.clear()
+        self._reload_internal()
+        log.info("reverted session preview (%d keys cleared)", count)
+        return f"preview reverted ({count} keys cleared)"
+
+    def commit(self, keys_json: str) -> str:
+        """Persist key updates to the user configuration file atomically and reload."""
+        updates = self._parse_updates(keys_json, "commit")
+        if isinstance(updates, str):
+            return updates
+
+        # Never write a key or value that the loader would refuse to read back.
+        accepted, rejected = validate_updates(updates)
+        if not accepted:
+            return self._report("error: nothing to commit", rejected)
+
+        user_path = self.dev_config.user_config_override if self.dev_config else None
+        ok, msg = commit_user_config(accepted, user_config_path=user_path)
+        if not ok:
+            log.error("commit failed: %s", msg)
+            return f"error: {msg}"
+
+        log.info("committed %d keys to user configuration file", len(accepted))
+        self._reload_internal()
+        return self._report(f"committed {len(accepted)} keys successfully", rejected)
+
+    @staticmethod
+    def _report(summary: str, rejected: list[Diagnostic]) -> str:
+        """Append rejected-key detail to a result summary."""
+        if not rejected:
+            return summary
+        for diagnostic in rejected:
+            log.warning("rejected %s: %s", diagnostic.key_path, diagnostic.message)
+        return summary + "; rejected: " + "; ".join(d.message for d in rejected)
+
+    def reload(self) -> str:
+        """Re-read configuration files from disk and refresh active effects."""
+        self._reload_internal()
+        log.info("reloaded configuration from disk")
+        return "configuration reloaded"
+
+    def _reload_internal(self) -> None:
+        """Re-resolve configuration and update active effect without restarting daemon."""
+        new_config, new_diagnostics = load_resolved_config(
+            session_overrides=self._session_overrides,
+            dev_config=self.dev_config,
+        )
+        self.config = new_config
+        self.diagnostics = new_diagnostics
+
+        # Update running effect with new options
+        self.effect.update_options(EffectOptions.from_config(self.config))
+
+        # The effect class is chosen once at startup; a mode change needs a restart.
+        if self.config.effect.mode != self.effect.name:
+            log.warning(
+                "effect.mode is now '%s' but '%s' is running; restart theater-mode.service"
+                " to switch effects",
+                self.config.effect.mode,
+                self.effect.name,
+            )
+
+        # Re-apply effect if a game is currently active
+        if self.active_output is not None and self._applied_others is not None:
+            stage = self._stage(self.game_windows())
+            if stage is not None:
+                self.effect.apply(stage.output, self._applied_others, stage.appid or "")
+
+        if self.on_config_changed:
+            try:
+                self.on_config_changed()
+            except Exception:
+                log.exception("error invoking on_config_changed callback")

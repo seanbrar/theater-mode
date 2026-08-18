@@ -1,0 +1,68 @@
+# theater-mode reference configuration
+#
+# Resolution hierarchy: Built-in defaults -> System config -> User config.
+# User configuration path: ~/.config/theater-mode/config.toml
+#
+# To modify settings live via D-Bus without editing this file directly:
+#   theater-mode config set effect.dim_factor 0.75
+#   theater-mode config preview effect.mode log
+#
+
+[effect]
+# Display effect to apply to secondary outputs: 'dim' (cinematic overlay) or 'log' (dry run).
+# Options: ["dim", "log"]
+mode = "dim"
+
+# Fraction of secondary display brightness to reduce (0.0 = no dimming, 1.0 = solid black, 0.85 = 15% brightness).
+# Range: [min: 0.0, max: 1.0]
+dim_factor = 0.85
+
+# Show active Steam game library hero artwork on secondary displays (true) or flat dark color (false).
+art = true
+
+
+[transition]
+# Transition fade duration in seconds.
+# Range: [min: 0.01, max: 60.0]
+duration = 2.0
+
+# Mathematical easing curve for fade transitions: 'sine', 'quad', 'cubic', or 'linear'.
+# Options: ["cubic", "linear", "quad", "sine"]
+curve = "sine"
+
+
+[daemon]
+# Grace period in seconds before restoring displays after all game windows close (0 disables delay).
+# Range: [min: 0.0, max: 300.0]
+revert_delay = 3.0
+
+# Stability delay in seconds before following a game window when it moves to a different display.
+# Range: [min: 0.0, max: 60.0]
+stage_delay = 1.5
+
+# Only activate theater mode when the game window enters true fullscreen.
+require_fullscreen = false
+
+# -----------------------------------------------------------------------------
+# Per-Output Overrides (Optional)
+#
+# Overridable keys: dim_factor, art, duration, curve
+#
+# Outputs are matched in this order, and the first section that exists wins:
+#   1. make:model:serial  - pins one physical panel, even among identical models
+#   2. make:model         - every panel of that model, stable across port swaps
+#   3. connector          - whatever is plugged into that port (e.g. DP-1)
+#
+# Run 'theater-mode outputs' to print the exact section headers for your displays.
+# -----------------------------------------------------------------------------
+#
+# [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
+# dim_factor = 0.90
+#
+# [outputs."Dell Inc.:DELL S2721QS"]
+# art = false
+#
+# [outputs.DP-2]
+# dim_factor = 0.50
+# duration = 1.0
+#

@@ -19,9 +19,11 @@ CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 
 DIMMER_BIN="$BIN_DIR/theater-dimmer"
 DAEMON="$BIN_DIR/theater-moded"
+CLIENT="$BIN_DIR/theater-mode"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
 DOC="$DATA_DIR/theater-mode/README.md"
+REF_CONFIG="$DATA_DIR/theater-mode/config.reference.toml"
 APP_DATA="$DATA_DIR/theater-mode"
 
 MODE=copy
@@ -64,7 +66,11 @@ place() {
 
 check_prerequisites() {
     local missing=()
-    command -v python3 >/dev/null || missing+=("python3 (>= 3.9)")
+    command -v python3 >/dev/null || missing+=("python3 (>= 3.12)")
+    if command -v python3 >/dev/null; then
+        python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null \
+            || missing+=("python3 >= 3.12 (found $(python3 -V 2>&1))")
+    fi
     command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
     command -v make >/dev/null || missing+=("make")
     command -v pkg-config >/dev/null || missing+=("pkg-config")
@@ -110,10 +116,20 @@ do_install() {
     chmod +x "$DIMMER_BIN"
     place "$REPO/bin/theater-moded" "$DAEMON"
     chmod +x "$DAEMON"
+    place "$REPO/bin/theater-mode" "$CLIENT"
+    chmod +x "$CLIENT"
     place "$REPO/src/theater_mode" "$APP_DATA/lib/theater_mode"
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
     place "$REPO/systemd/theater-mode.service" "$UNIT"
     place "$REPO/README.md" "$DOC"
+
+    # The reference config is generated from the schema, never hand-maintained.
+    mkdir -p "$(dirname "$REF_CONFIG")"
+    PYTHONPATH="$REPO/src" python3 -c \
+        'import sys
+from theater_mode.config import generate_reference_config
+sys.stdout.write(generate_reference_config())' > "$REF_CONFIG" \
+        || die "failed to generate $REF_CONFIG"
 
     systemctl --user daemon-reload || die "systemctl daemon-reload failed"
     systemctl --user enable theater-mode.service >/dev/null 2>&1 \
@@ -122,28 +138,26 @@ do_install() {
 
     cat <<EOF
 
-theater-mode installed.
+theater-mode installed successfully.
 
 Next steps:
   1. Enable the KWin script:
      System Settings -> Window Management -> KWin Scripts -> "Theater Mode Detector"
 
-  2. Configure an effect (default is dry-run 'log'):
-     systemctl --user edit theater-mode.service
+  2. theater-mode works immediately with built-in defaults (cinematic dimming active).
 
-     [Service]
-     Environment=THEATER_EFFECT=dim
-
-     systemctl --user restart theater-mode.service
+  3. Inspect or modify configuration live via the CLI:
+     theater-mode config show
+     theater-mode config set effect.dim_factor 0.75
 
 Logs:          journalctl --user -u theater-mode.service -f
-Documentation: $DOC
+Reference:     $REF_CONFIG
 EOF
 }
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$DIMMER_BIN" "$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA")
+    local targets=("$DIMMER_BIN" "$DAEMON" "$CLIENT" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA")
     local found=0
     for t in "${targets[@]}"; do
         if [ -e "$t" ] || [ -L "$t" ]; then

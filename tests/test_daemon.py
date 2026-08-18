@@ -2,22 +2,33 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from theater_mode.config import DaemonConfig, DevConfig, ResolvedConfig
 from theater_mode.daemon import Daemon
 
 
 class TestDaemon(unittest.TestCase):
     def setUp(self) -> None:
         self.mock_effect = MagicMock()
-        self.mock_effect.name = "log"
+        self.mock_effect.name = "dim"
+
+        # Point both config layers at an empty temp dir so reloads never read the
+        # developer's own ~/.config/theater-mode/config.toml.
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        config_dir = Path(self.temp_dir.name)
 
         self.daemon = Daemon(
             effect=self.mock_effect,
-            require_fullscreen=False,
-            revert_delay=0.0,
-            stage_delay=0.0,
+            config=ResolvedConfig(daemon=DaemonConfig(revert_delay=0.0, stage_delay=0.0)),
+            dev_config=DevConfig(
+                user_config_override=config_dir / "user.toml",
+                system_config_override=config_dir / "system.toml",
+            ),
         )
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2", "DP-3"})
@@ -92,6 +103,43 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(clear_res, "cleared")
         self.assertIsNone(self.daemon.active_output)
         self.assertEqual(len(self.daemon.windows), 0)
+
+    def test_config_dbus_methods(self) -> None:
+        # GetResolved
+        resolved_json = self.daemon.get_resolved()
+        self.assertIn("effect", resolved_json)
+        self.assertIn("provenance", resolved_json)
+
+        # GetDiagnostics
+        diags_json = self.daemon.get_diagnostics()
+        self.assertEqual(diags_json, "[]")
+
+        # Preview
+        prev_res = self.daemon.preview('{"effect.dim_factor": 0.33}')
+        self.assertIn("preview applied", prev_res)
+        self.assertEqual(self.daemon.config.effect.dim_factor, 0.33)
+
+        # RevertPreview
+        revert_res = self.daemon.revert_preview()
+        self.assertIn("preview reverted", revert_res)
+        self.assertEqual(self.daemon.config.effect.dim_factor, 0.85)
+
+        # Reload falls back to built-in defaults (both layers are empty)
+        reload_res = self.daemon.reload()
+        self.assertIn("reloaded", reload_res)
+        self.assertEqual(self.daemon.config.daemon.revert_delay, 3.0)
+
+    def test_invalid_keys_are_rejected_not_persisted(self) -> None:
+        result = self.daemon.commit('{"effect.dim_factor": 99.0, "effect.nonsense": 1}')
+        self.assertTrue(result.startswith("error: nothing to commit"))
+        self.assertIn("exceeds maximum", result)
+        self.assertIn("Unknown configuration key", result)
+        self.assertFalse((self.daemon.dev_config.user_config_override).exists())
+
+    def test_commit_persists_valid_keys(self) -> None:
+        result = self.daemon.commit('{"effect.dim_factor": 0.4}')
+        self.assertIn("committed 1 keys", result)
+        self.assertEqual(self.daemon.config.effect.dim_factor, 0.4)
 
 
 if __name__ == "__main__":

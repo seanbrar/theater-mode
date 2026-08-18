@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Executable entrypoint for the theater-mode CLI client."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+# Resolve the theater_mode package:
+# 1. Check relative repository src/ directory (running from repository or symlink)
+# 2. Check XDG data library directory (installed copy)
+REPO_SRC = Path(__file__).resolve().parent.parent / "src"
+DATA_LIB = (
+    Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+    / "theater-mode"
+    / "lib"
+)
+
+if REPO_SRC.is_dir() and str(REPO_SRC) not in sys.path:
+    sys.path.insert(0, str(REPO_SRC))
+elif DATA_LIB.is_dir() and str(DATA_LIB) not in sys.path:
+    sys.path.insert(0, str(DATA_LIB))
+
+from theater_mode.client import main
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,4 +1,4 @@
-"""Command-line interface, process lifecycle, and application entry point."""
+"""Command-line interface, process lifecycle, and application entry point for theater-moded."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 import logging
 import signal
 import sys
+from pathlib import Path
 
 import gi
 
@@ -15,11 +16,14 @@ gi.require_version("GLibUnix", "2.0")
 from gi.repository import Gio, GLib, GLibUnix  # noqa: E402
 
 from theater_mode import __version__  # noqa: E402
+from theater_mode.config import (  # noqa: E402
+    DevConfig,
+    get_dev_config,
+    load_resolved_config,
+)
 from theater_mode.constants import (  # noqa: E402
     BUS_NAME,
-    DEFAULT_DIM_CURVE,
-    DEFAULT_DIM_DURATION,
-    DEFAULT_DIM_FACTOR,
+    INTERFACE,
     INTERFACE_XML,
     OBJECT_PATH,
 )
@@ -31,101 +35,75 @@ log = logging.getLogger("theater-moded")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse and validate command-line arguments."""
+    """Parse and validate command-line arguments (Dev keys only)."""
     parser = argparse.ArgumentParser(
         prog="theater-moded",
         description="Smart multi-monitor theater mode daemon for KDE Plasma on Wayland.",
     )
     parser.add_argument("--version", action="version", version=f"theater-moded {__version__}")
     parser.add_argument(
-        "--effect",
-        default="log",
-        choices=sorted(EFFECTS),
-        help="effect to apply to secondary outputs; default is log (dry run)",
-    )
-    parser.add_argument(
-        "--dim-factor",
-        type=float,
-        default=DEFAULT_DIM_FACTOR,
-        help="how much of a secondary output's brightness to remove "
-        f"(0 = no dimming, 1 = fully black; default: {DEFAULT_DIM_FACTOR})",
-    )
-    parser.add_argument(
-        "--dim-duration",
-        type=float,
-        default=DEFAULT_DIM_DURATION,
-        help=f"duration in seconds for cinematic fade transitions (default: {DEFAULT_DIM_DURATION}s)",
-    )
-    parser.add_argument(
-        "--dim-curve",
-        type=str,
-        default=DEFAULT_DIM_CURVE,
-        choices=["sine", "quad", "cubic", "linear"],
-        help=f"mathematical easing curve for fades (default: {DEFAULT_DIM_CURVE})",
-    )
-    parser.add_argument(
-        "--art",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="show the game's Steam library artwork on dimmed outputs (default: enabled)",
-    )
-    parser.add_argument(
-        "--revert-delay",
-        type=float,
-        default=3.0,
-        help="grace period (seconds) before reverting after game windows close (0 disables)",
-    )
-    parser.add_argument(
-        "--stage-delay",
-        type=float,
-        default=1.5,
-        help="stability delay (seconds) before following a game to a new display output",
-    )
-    parser.add_argument(
-        "--require-fullscreen",
-        action="store_true",
-        help="only treat a game as active once its window enters fullscreen",
-    )
-    parser.add_argument(
         "--verbose",
         action="store_true",
-        help="enable verbose debug logging for all window events",
+        help="enable verbose debug logging for all window and effect events (Dev key)",
     )
-    args = parser.parse_args(argv)
-
-    if not 0.0 <= args.dim_factor <= 1.0:
-        parser.error("--dim-factor must be between 0 (no dimming) and 1 (fully black)")
-
-    if args.dim_duration <= 0.0:
-        parser.error("--dim-duration must be greater than 0")
-
-    return args
+    parser.add_argument(
+        "--replace-user-config",
+        type=Path,
+        dest="user_config_override",
+        help="path to replacement user configuration file for testing (Dev key)",
+    )
+    parser.add_argument(
+        "--replace-system-config",
+        type=Path,
+        dest="system_config_override",
+        help="path to replacement system configuration file for testing (Dev key)",
+    )
+    return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the theater-moded application."""
     args = parse_args(argv)
 
+    # Read base dev config from environment and merge any explicit dev CLI flags
+    env_dev = get_dev_config()
+    dev_config = DevConfig(
+        user_config_override=args.user_config_override or env_dev.user_config_override,
+        system_config_override=args.system_config_override or env_dev.system_config_override,
+        force_art_dir=env_dev.force_art_dir,
+        verbose=args.verbose or env_dev.verbose,
+    )
+
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if dev_config.verbose else logging.INFO,
         format="%(levelname)s %(message)s",
         stream=sys.stderr,
     )
 
-    effect = EFFECTS[args.effect].create(
-        EffectOptions(
-            dim_factor=args.dim_factor,
-            dim_duration=args.dim_duration,
-            dim_curve=args.dim_curve,
-            art=args.art,
+    # Resolve 3-layer configuration at composition root
+    resolved_config, diagnostics = load_resolved_config(dev_config=dev_config)
+    for d in diagnostics:
+        log.warning(
+            "config %s: %s (file: %s, line: %s)",
+            d.severity,
+            d.message,
+            d.source_file or "global",
+            d.line_number or "-",
         )
-    )
+
+    effect_mode = resolved_config.effect.mode
+    if effect_mode not in EFFECTS:
+        log.warning("configured effect '%s' not recognized; falling back to 'dim'", effect_mode)
+        effect_mode = "dim"
+
+    effect_cls = EFFECTS[effect_mode]
+    effect = effect_cls.create(EffectOptions.from_config(resolved_config))
 
     daemon = Daemon(
         effect=effect,
-        require_fullscreen=args.require_fullscreen,
-        revert_delay=max(0.0, args.revert_delay),
-        stage_delay=max(0.0, args.stage_delay),
+        config=resolved_config,
+        diagnostics=diagnostics,
+        dev_config=dev_config,
     )
 
     loop = GLib.MainLoop()
@@ -144,8 +122,25 @@ def main(argv: list[str] | None = None) -> int:
 
     node = Gio.DBusNodeInfo.new_for_xml(INTERFACE_XML)
     registration: dict[str, int] = {}
+    active_connection: list[Gio.DBusConnection] = []
+
+    def on_config_changed_signal() -> None:
+        if active_connection:
+            try:
+                active_connection[0].emit_signal(
+                    None,
+                    OBJECT_PATH,
+                    INTERFACE,
+                    "ConfigChanged",
+                    None,
+                )
+            except Exception:
+                log.exception("failed to emit ConfigChanged signal")
+
+    daemon.on_config_changed = on_config_changed_signal
 
     def on_bus_acquired(conn: Gio.DBusConnection, name: str, *_: object) -> None:
+        active_connection.append(conn)
         registration["id"] = conn.register_object_with_closures2(
             OBJECT_PATH, node.interfaces[0], make_handler(daemon), None, None
         )

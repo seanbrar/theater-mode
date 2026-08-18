@@ -13,7 +13,7 @@ Built for KDE Plasma 6 on Wayland.
 ./install.sh --link   # Symlink files for live development
 ```
 
-Files are installed to standard user locations under `$HOME` without root privileges. The daemon runs in dry-run mode (`log`) by default until configured.
+Files are installed to standard user locations under `$HOME` without root privileges. The daemon runs with active cinematic dimming enabled out of the box with zero configuration required.
 
 To uninstall:
 ```sh
@@ -25,49 +25,132 @@ To uninstall:
 1. **Enable the KWin Script**:
    Open **System Settings → Window Management → KWin Scripts** and enable **Theater Mode Detector**.
 
-2. **Configure an Effect**:
-   Create a systemd user drop-in:
+2. **Verify Daemon**:
    ```sh
-   systemctl --user edit theater-mode.service
+   theater-mode status
    ```
-   Add:
-   ```ini
-   [Service]
-   Environment=THEATER_EFFECT=dim
-   ```
-   Restart the service:
-   ```sh
-   systemctl --user restart theater-mode.service
-   ```
-   See [`override.conf.example`](override.conf.example) for additional options.
 
 ## Configuration
 
-Set configuration variables in the systemd drop-in or as command-line flags to `theater-moded`:
+`theater-mode` uses a structured 3-layer TOML configuration model resolved at runtime:
 
-| Variable | Default | Description |
+1. **Built-in Defaults** (in code, sufficient to run out of the box)
+2. **System Configuration** (`/etc/xdg/theater-mode/config.toml`)
+3. **User Configuration** (`~/.config/theater-mode/config.toml`)
+
+### Managing Configuration via CLI
+
+Use the `theater-mode` command-line tool to inspect or modify configuration live over D-Bus:
+
+```sh
+# View resolved configuration with per-key provenance and origin layers
+theater-mode config show
+
+# Check configuration warnings or malformed key diagnostics
+theater-mode config diagnostics
+
+# Read a single resolved value
+theater-mode config get effect.dim_factor
+
+# Preview a setting in-session without saving to disk
+theater-mode config preview effect.dim_factor 0.50
+
+# Revert in-session preview
+theater-mode config revert-preview
+
+# Permanently commit a setting to ~/.config/theater-mode/config.toml
+theater-mode config set effect.dim_factor 0.75
+
+# Reload configuration from disk
+theater-mode config reload
+
+# List connected displays and the config sections that address each one
+theater-mode outputs
+```
+
+Values are validated against the schema before they are written, so an unknown key or an
+out-of-range value is refused rather than persisted. Everything applies live except
+`effect.mode`, which selects the effect implementation at startup and needs
+`systemctl --user restart theater-mode.service`.
+
+### Configuration File Format
+
+See [`config.reference.toml`](config.reference.toml) for the complete reference configuration generated directly from the schema.
+
+```toml
+[effect]
+# Display effect: 'dim' (cinematic overlay) or 'log' (dry run)
+mode = "dim"
+
+# Fraction of brightness to reduce (0.0 = no dimming, 1.0 = solid black)
+dim_factor = 0.85
+
+# Show Steam library artwork on secondary displays
+art = true
+
+[transition]
+# Transition fade duration in seconds
+duration = 2.0
+
+# Easing curve: 'sine', 'quad', 'cubic', or 'linear'
+curve = "sine"
+
+[daemon]
+# Grace period in seconds before restoring displays after game exits
+revert_delay = 3.0
+
+# Stability delay in seconds before following game to a new display
+stage_delay = 1.5
+
+# Require game window to enter fullscreen before activating
+require_fullscreen = false
+
+# Per-output overrides -- see "Addressing Displays" below
+[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
+dim_factor = 0.50
+art = false
+```
+
+### Addressing Displays
+
+Only `dim_factor`, `art`, `duration`, and `curve` can be set per output; `effect.mode` and
+the `[daemon]` keys are global.
+
+An output's identity is read from its EDID over DRM sysfs, so displays can be addressed by
+what they *are* rather than by which port they happen to occupy. Sections are matched in
+this order, and the first one that exists wins:
+
+| Priority | Section | Selects |
 | --- | --- | --- |
-| `THEATER_EFFECT` | `log` | Active effect: `dim` (cinematic Wayland fade with game artwork) or `log` (dry run). |
-| `THEATER_ART` | `--art` | `--art` shows the game's Steam library artwork on dimmed displays; `--no-art` dims to flat black. |
-| `THEATER_DIM_FACTOR` | `0.85` | Fraction of display brightness to reduce (`0.0` = no dimming, `1.0` = black, `0.85` = 15% brightness remaining). Darkens artwork directly when artwork is enabled. |
-| `THEATER_DIM_DURATION` | `2.0` | Fade transition duration in seconds. |
-| `THEATER_DIM_CURVE` | `sine` | Easing curve: `sine`, `quad`, `cubic`, or `linear`. |
-| `THEATER_STAGE_DELAY` | `1.5` | Stability delay (seconds) before following a game window to a new display. |
-| `THEATER_REVERT_DELAY` | `3` | Grace period (seconds) before restoring displays after game windows close (`0` disables). |
+| 1 | `[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]` | one specific panel, even among identical models |
+| 2 | `[outputs."Dell Inc.:DELL S2721QS"]` | every panel of that model, stable across port swaps |
+| 3 | `[outputs.DP-2]` | whatever is plugged into that connector |
 
-Additional command-line flags:
+Run `theater-mode outputs` to print the exact section headers for your hardware:
 
-| Flag | Description |
-| --- | --- |
-| `--verbose` | Enable debug logging for all window events. |
-| `--require-fullscreen` | Only activate when the game window enters fullscreen. |
+```
+ DP-2
+   Dell Inc. DELL S2721QS
+   serial: 4QCPZY3
+   config sections, most specific first:
+     [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
+     [outputs."DEL:DELL S2721QS:4QCPZY3"]
+     [outputs."Dell Inc.:DELL S2721QS"]
+     [outputs."DEL:DELL S2721QS"]
+     [outputs.DP-2]
+```
+
+The full vendor name (`Dell Inc.`) comes from the system PnP ID table at
+`/usr/share/hwdata/pnp.ids`; the raw three-letter EDID code (`DEL`) is always accepted as
+an equivalent, so a config file stays valid on hosts without that table. Displays that
+report no usable EDID -- virtual outputs, some KVM switches, sleeping panels -- are still
+fully supported and are addressed by connector name.
 
 ## Status & Monitoring
 
-Check daemon status via D-Bus:
+Check daemon status:
 ```sh
-busctl --user call org.theatermode.TheaterMode /org/theatermode/TheaterMode \
-    org.theatermode.TheaterMode Status
+theater-mode status
 ```
 
 Follow daemon logs:
@@ -80,15 +163,13 @@ journalctl --user -u theater-mode.service -f
 Test effects without launching a game:
 ```sh
 # Simulate a game launch (AppID 1671210 on display DP-1)
-busctl --user call org.theatermode.TheaterMode /org/theatermode/TheaterMode \
-    org.theatermode.TheaterMode Simulate ss "1671210" "DP-1"
+theater-mode simulate "1671210" "DP-1"
 
 # Clear simulation and restore displays
-busctl --user call org.theatermode.TheaterMode /org/theatermode/TheaterMode \
-    org.theatermode.TheaterMode Clear
+theater-mode clear
 ```
 
-`Clear` resets window tracking and immediately restores all displays.
+`clear` resets window tracking and immediately restores all displays.
 
 ## Game Detection
 
@@ -104,7 +185,7 @@ Desktop shells and Steam client processes (such as `steamwebhelper` and `plasmas
 When enabled, `theater-mode` locates cached Steam library hero artwork at `~/.local/share/Steam/appcache/librarycache/<appid>/**/library_hero.jpg`.
 
 * **Compositing**: The hero image is centered over a blurred, ambient backdrop sized to the target display's native resolution and feathered at the seams.
-* **Brightness**: `THEATER_DIM_FACTOR` is applied directly to the image brightness during rendering so artwork darkens naturally.
+* **Brightness**: `dim_factor` is applied directly to the image brightness during rendering so artwork darkens naturally.
 * **Caching**: Generated raw frames are cached in `~/.cache/theater-mode/` per AppID and resolution.
 * **Direct Mapping**: Raw premultiplied ARGB8888 frames are passed directly to `theater-dimmer` and mapped via `wl_shm` without image decoding in the display loop.
 * **Fallback**: If Pillow is not installed or hero art is unavailable, displays dim to solid black.
@@ -114,15 +195,18 @@ When enabled, `theater-mode` locates cached Steam library hero artwork at `~/.lo
 * **Software Dimming**: Overlays are drawn as Wayland surfaces using the `wlr-layer-shell` protocol. Hardware backlight and DDC/CI states are untouched.
 * **Failure Safety**: `theater-dimmer` runs as a child process with stdin connected to the daemon. If the daemon exits or is killed, the helper detects EOF, destroys its surfaces, and exits cleanly.
 * **Clock-Driven Animations**: Fade transitions calculate progress using monotonic timestamps, ensuring correct restoration even if frame callbacks stall across display sleep.
-* **Stateless**: Display configuration and tracking remain purely in memory; no persistent desktop settings are modified.
+* **Live Reconfiguration**: Configuration updates, previews, and queries are served over D-Bus and re-applied to running effects without restarting the daemon.
 
 ## Components & File Layout
 
 | Path | Role |
 | --- | --- |
+| `~/.local/bin/theater-mode` | Client CLI for status, simulation, and live configuration over D-Bus. |
 | `~/.local/bin/theater-moded` | Python daemon managing state machine and D-Bus interfaces. |
 | `~/.local/bin/theater-dimmer` | Native C Wayland helper rendering overlay surfaces. |
 | `~/.local/share/kwin/scripts/theater-detect/` | KWin script reporting window events. |
+| `/sys/class/drm/card*-*/edid` | Read-only source for per-display identity matching. |
+| `~/.config/theater-mode/config.toml` | User configuration file. |
 | `~/.config/systemd/user/theater-mode.service` | Systemd user service unit. |
 | `~/.cache/theater-mode/` | Generated artwork cache. |
 

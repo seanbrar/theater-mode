@@ -20,10 +20,7 @@ STEAM_LIBRARY_CACHE = (
 )
 ART_CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "theater-mode"
 
-# Wayland Dimmer Defaults
-DEFAULT_DIM_FACTOR = 0.85
-DEFAULT_DIM_DURATION = 2.0
-DEFAULT_DIM_CURVE = "sine"
+# Wayland Dimmer
 DIMMER_BINARY_NAME = "theater-dimmer"
 
 # Steam Detection Patterns
@@ -81,6 +78,30 @@ INTERFACE_XML = f"""
     <method name='Clear'>
       <arg type='s' name='result' direction='out'/>
     </method>
+    <method name='GetOutputs'>
+      <arg type='s' name='outputs_json' direction='out'/>
+    </method>
+    <method name='GetResolved'>
+      <arg type='s' name='config_json' direction='out'/>
+    </method>
+    <method name='GetDiagnostics'>
+      <arg type='s' name='diagnostics_json' direction='out'/>
+    </method>
+    <method name='Preview'>
+      <arg type='s' name='keys_json' direction='in'/>
+      <arg type='s' name='result' direction='out'/>
+    </method>
+    <method name='RevertPreview'>
+      <arg type='s' name='result' direction='out'/>
+    </method>
+    <method name='Commit'>
+      <arg type='s' name='keys_json' direction='in'/>
+      <arg type='s' name='result' direction='out'/>
+    </method>
+    <method name='Reload'>
+      <arg type='s' name='result' direction='out'/>
+    </method>
+    <signal name='ConfigChanged'/>
   </interface>
 </node>
 """

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from theater_mode.config import get_dev_config
 from theater_mode.constants import (
     ART_CACHE,
     IGNORED_CLASSES,
@@ -53,11 +54,12 @@ def find_hero_art(appid: str) -> Path | None:
     Note: Local artwork is available for games whose store or library page has been
     viewed in the Steam client. Returns None if artwork is unavailable.
     """
-    app_cache_dir = STEAM_LIBRARY_CACHE / appid
+    library_cache = get_dev_config().force_art_dir or STEAM_LIBRARY_CACHE
+    app_cache_dir = library_cache / appid
     if not app_cache_dir.is_dir():
         return None
 
-    candidates = list(app_cache_dir.glob("**/library_hero.jpg"))
+    candidates = list(app_cache_dir.rglob("library_hero.jpg"))
     if not candidates:
         return None
 
