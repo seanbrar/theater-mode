@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: bin/check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev pkg-config python3-gi
+      - name: Install ruff
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: uv tool install "ruff>=0.16,<0.17"
+      - run: ./bin/check
+
+  tests:
+    name: tests (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Run test suite
+        run: |
+          uv run --no-project --python "${{ matrix.python }}" \
+            python -m unittest discover -s tests -t . -v
+
+  lint-shell-js:
+    name: shell and JS
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck install.sh bin/check
+      - run: node --check kwin/theater-detect/contents/code/main.js
+      - run: python3 -c 'import json; json.load(open("kwin/theater-detect/metadata.json"))'
+
+  install-lifecycle:
+    name: install and uninstall (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [copy, link]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev pkg-config python3-gi
+      - name: Stage into a clean HOME
+        run: |
+          set -euo pipefail
+          FAKE="$RUNNER_TEMP/home"
+          BIN="$FAKE/bin & tools"
+          mkdir -p "$FAKE"
+          [ "${{ matrix.mode }}" = link ] && LINK=--link || LINK=
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+              HOME="$FAKE" XDG_BIN_HOME="$BIN" ./install.sh --no-service $LINK
+
+          fail() { echo "::error::$*"; exit 1; }
+          for f in "$BIN/theater-mode" "$BIN/theater-moded" "$BIN/theater-dimmer" \
+                   "$FAKE/.local/share/theater-mode/lib/theater_mode/__init__.py" \
+                   "$FAKE/.local/share/theater-mode/config.reference.toml" \
+                   "$FAKE/.local/share/kwin/scripts/theater-detect/metadata.json" \
+                   "$FAKE/.config/systemd/user/theater-mode.service"; do
+            [ -e "$f" ] || fail "missing after install: $f"
+          done
+
+          UNIT="$FAKE/.config/systemd/user/theater-mode.service"
+          [ "$(sed -n 's|^ExecStart=/usr/bin/env -- "\(.*\)"$|\1|p' "$UNIT")" = "$BIN/theater-moded" ] \
+            || fail "ExecStart does not contain the daemon path"
+          systemd-analyze verify "$UNIT" \
+            || fail "generated systemd unit is invalid"
+
+          if [ "${{ matrix.mode }}" = copy ]; then
+            [ ! -e "$FAKE/.local/share/theater-mode/lib/theater_mode/dimmer" ] \
+              || fail "dimmer/ leaked into the installed package"
+            [ -z "$(find "$FAKE/.local/share/theater-mode/lib" -name __pycache__ -print -quit)" ] \
+              || fail "__pycache__ leaked into the installed package"
+          fi
+
+          AMBIENT="$RUNNER_TEMP/ambient/theater_mode"
+          mkdir -p "$AMBIENT"
+          printf '%s\n' '# Deliberately incomplete ambient package.' > "$AMBIENT/__init__.py"
+          ( cd / && env -i PATH=/usr/bin:/bin HOME="$FAKE" \
+              PYTHONPATH="$RUNNER_TEMP/ambient" \
+              "$BIN/theater-mode" --help >/dev/null ) \
+            || fail "installed client did not prefer its bundled theater_mode package"
+
+      - name: Uninstall and verify nothing is left
+        run: |
+          set -euo pipefail
+          FAKE="$RUNNER_TEMP/home"
+          BIN="$FAKE/bin & tools"
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+              HOME="$FAKE" XDG_BIN_HOME="$BIN" ./install.sh --uninstall --no-service --yes
+          leftovers=$(find "$FAKE" -type f -o -type l | wc -l)
+          [ "$leftovers" -eq 0 ] || {
+            find "$FAKE" -type f -o -type l
+            echo "::error::uninstall left $leftovers file(s) behind"; exit 1;
+          }
+
+      - name: Repository must be unchanged by a link install
+        run: git diff --exit-code && git status --porcelain

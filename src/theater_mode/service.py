@@ -5,30 +5,27 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Callable
-
-import gi
-
-gi.require_version("Gio", "2.0")
-gi.require_version("GLib", "2.0")
-from gi.repository import Gio, GLib  # noqa: E402
+from typing import Any
 
 from theater_mode.constants import INTERFACE
 from theater_mode.daemon import Daemon
 
 log = logging.getLogger("theater-moded")
 
+VariantFactory = Callable[[str, tuple[Any, ...]], Any]
 
-def make_handler(daemon: Daemon) -> Callable:
+
+def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., None]:
     """Create a D-Bus method dispatch closure bound to a Daemon instance."""
 
     def handle_call(
-        conn: Gio.DBusConnection,
+        conn: Any,
         sender: str,
         path: str,
         iface: str,
         method: str,
-        params: GLib.Variant,
-        invocation: Gio.DBusMethodInvocation,
+        params: Any,
+        invocation: Any,
         *_: object,
     ) -> None:
         try:
@@ -45,34 +42,34 @@ def make_handler(daemon: Daemon) -> Callable:
                 case "SnapshotEnd":
                     daemon.snapshot_end()
                 case "Status":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.status(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.status(),)))
                     return
                 case "Simulate":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.simulate(*args),)))
+                    invocation.return_value(make_variant("(s)", (daemon.simulate(*args),)))
                     return
                 case "Clear":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.clear(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.clear(),)))
                     return
                 case "GetOutputs":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.get_outputs(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.get_outputs(),)))
                     return
                 case "GetResolved":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.get_resolved(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.get_resolved(),)))
                     return
                 case "GetDiagnostics":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.get_diagnostics(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.get_diagnostics(),)))
                     return
                 case "Preview":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.preview(*args),)))
+                    invocation.return_value(make_variant("(s)", (daemon.preview(*args),)))
                     return
                 case "RevertPreview":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.revert_preview(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.revert_preview(),)))
                     return
                 case "Commit":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.commit(*args),)))
+                    invocation.return_value(make_variant("(s)", (daemon.commit(*args),)))
                     return
                 case "Reload":
-                    invocation.return_value(GLib.Variant("(s)", (daemon.reload(),)))
+                    invocation.return_value(make_variant("(s)", (daemon.reload(),)))
                     return
                 case _:
                     invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)

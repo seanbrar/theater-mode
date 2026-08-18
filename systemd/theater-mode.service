@@ -7,7 +7,8 @@ After=plasma-workspace.target
 Type=simple
 # All settings live in ~/.config/theater-mode/config.toml.
 # Inspect or change them with `theater-mode config show` / `theater-mode config set`.
-ExecStart=%h/.local/bin/theater-moded
+# @DAEMON@ is rendered by install.sh based on $XDG_BIN_HOME.
+ExecStart=/usr/bin/env -- "@DAEMON@"
 Restart=on-failure
 RestartSec=5
 Slice=session.slice

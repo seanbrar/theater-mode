@@ -5,21 +5,22 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from typing import Any
 
-import gi
-
-gi.require_version("Gio", "2.0")
-gi.require_version("GLib", "2.0")
-from gi.repository import Gio, GLib  # noqa: E402
-
-from theater_mode.config import split_key_path  # noqa: E402
-from theater_mode.constants import BUS_NAME, INTERFACE, OBJECT_PATH  # noqa: E402
+from theater_mode.config import split_key_path
+from theater_mode.constants import BUS_NAME, INTERFACE, OBJECT_PATH
 
 
 def _call_dbus_method(method_name: str, *args: Any) -> str:
     """Invoke a D-Bus method on the active theater-mode daemon and return the string response."""
     try:
+        import gi
+
+        gi.require_version("Gio", "2.0")
+        gi.require_version("GLib", "2.0")
+        from gi.repository import Gio, GLib
+
         conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         params = None
         if args:
@@ -178,7 +179,10 @@ def _parse_cli_value(val_str: str) -> Any:
         return val_str
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    call_dbus: Callable[..., str] = _call_dbus_method,
+) -> int:
     parser = argparse.ArgumentParser(
         prog="theater-mode",
         description="Command-line client for theater-mode daemon and configuration management.",
@@ -240,18 +244,18 @@ def main(argv: list[str] | None = None) -> int:
 
     match args.command, getattr(args, "config_cmd", None):
         case "status", _:
-            print(_call_dbus_method("Status"))
+            print(call_dbus("Status"))
         case "simulate", _:
-            print(_call_dbus_method("Simulate", args.appid, args.output))
+            print(call_dbus("Simulate", args.appid, args.output))
         case "clear", _:
-            print(_call_dbus_method("Clear"))
+            print(call_dbus("Clear"))
         case "outputs", _:
-            raw = _call_dbus_method("GetOutputs")
+            raw = call_dbus("GetOutputs")
             print(raw if args.json else _format_outputs(json.loads(raw)))
 
         case "config", "show" | "diagnostics" as sub:
             method = "GetResolved" if sub == "show" else "GetDiagnostics"
-            raw = _call_dbus_method(method)
+            raw = call_dbus(method)
             if args.json:
                 print(raw)
             elif sub == "show":
@@ -260,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(_format_diagnostics(json.loads(raw)))
 
         case "config", "get":
-            value = _lookup(json.loads(_call_dbus_method("GetResolved")), args.key)
+            value = _lookup(json.loads(call_dbus("GetResolved")), args.key)
             if value is _MISSING:
                 print(
                     f"error: key '{args.key}' not found in resolved configuration",
@@ -271,16 +275,16 @@ def main(argv: list[str] | None = None) -> int:
 
         case "config", "set" | "preview" as sub:
             method = "Commit" if sub == "set" else "Preview"
-            result = _call_dbus_method(method, json.dumps({args.key: _parse_cli_value(args.value)}))
+            result = call_dbus(method, json.dumps({args.key: _parse_cli_value(args.value)}))
             print(result)
             # The daemon reports refused keys inline rather than failing the D-Bus call.
             if result.startswith("error") or "rejected:" in result:
                 return 1
 
         case "config", "revert-preview":
-            print(_call_dbus_method("RevertPreview"))
+            print(call_dbus("RevertPreview"))
         case "config", "reload":
-            print(_call_dbus_method("Reload"))
+            print(call_dbus("Reload"))
 
     return 0
 

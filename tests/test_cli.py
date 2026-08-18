@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from theater_mode.cli import parse_args as parse_daemon_args
 from theater_mode.client import (
@@ -14,6 +17,9 @@ from theater_mode.client import (
     _lookup,
     _parse_cli_value,
 )
+from theater_mode.client import (
+    main as client_main,
+)
 from theater_mode.effects import EFFECTS
 from theater_mode.effects.base import EffectOptions
 from theater_mode.effects.dim import DimEffect
@@ -21,6 +27,13 @@ from theater_mode.effects.log import LogEffect
 
 
 class TestCLI(unittest.TestCase):
+    def _run_client(self, argv: list[str], response: str) -> tuple[int, str, str, MagicMock]:
+        call_dbus = MagicMock(return_value=response)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = client_main(argv, call_dbus=call_dbus)
+        return result, stdout.getvalue(), stderr.getvalue(), call_dbus
+
     def test_parse_daemon_defaults(self) -> None:
         args = parse_daemon_args([])
         self.assertFalse(args.verbose)
@@ -144,6 +157,77 @@ class TestCLI(unittest.TestCase):
 
     def test_client_formats_empty_output_list(self) -> None:
         self.assertIn("No connected outputs", _format_outputs([]))
+
+    def test_client_main_simple_commands(self) -> None:
+        cases = [
+            (["status"], "Status", (), "Daemon active: 1 window(s)"),
+            (["simulate", "1671210", "DP-1"], "Simulate", ("1671210", "DP-1"), "simulated"),
+            (["clear"], "Clear", (), "cleared"),
+            (["config", "revert-preview"], "RevertPreview", (), "preview reverted"),
+            (["config", "reload"], "Reload", (), "reloaded"),
+        ]
+        for argv, method, args, response in cases:
+            with self.subTest(argv=argv):
+                result, stdout, _, call_dbus = self._run_client(argv, response)
+                self.assertEqual(result, 0)
+                self.assertEqual(stdout.strip(), response)
+                call_dbus.assert_called_once_with(method, *args)
+
+    def test_client_main_outputs(self) -> None:
+        raw_json = '[{"connector": "DP-1", "active": true, "match_keys": ["Dell"]}]'
+        result, stdout, _, call_dbus = self._run_client(["outputs"], raw_json)
+        self.assertEqual(result, 0)
+        self.assertIn("DP-1", stdout)
+        call_dbus.assert_called_once_with("GetOutputs")
+
+        result, stdout, _, _ = self._run_client(["outputs", "--json"], raw_json)
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.strip(), raw_json)
+
+    def test_client_main_config_show_and_diagnostics(self) -> None:
+        raw_config = (
+            '{"effect": {"mode": "dim", "dim_factor": 0.85}, "transition": {}, "daemon": {}}'
+        )
+        result, stdout, _, _ = self._run_client(["config", "show"], raw_config)
+        self.assertEqual(result, 0)
+        self.assertIn("Resolved Configuration", stdout)
+
+        result, stdout, _, _ = self._run_client(["config", "show", "--json"], raw_config)
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.strip(), raw_config)
+
+        result, stdout, _, _ = self._run_client(["config", "diagnostics"], "[]")
+        self.assertEqual(result, 0)
+        self.assertIn("No configuration diagnostics", stdout)
+
+    def test_client_main_config_get(self) -> None:
+        raw_config = '{"effect": {"dim_factor": 0.85, "mode": "dim"}}'
+        result, stdout, _, _ = self._run_client(["config", "get", "effect.dim_factor"], raw_config)
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.strip(), "0.85")
+
+        result, _, stderr, _ = self._run_client(["config", "get", "nonexistent.key"], raw_config)
+        self.assertEqual(result, 1)
+        self.assertIn("error: key 'nonexistent.key' not found", stderr)
+
+    def test_client_main_config_set_and_preview(self) -> None:
+        result, _, _, call_dbus = self._run_client(
+            ["config", "set", "effect.dim_factor", "0.5"], "committed 1 keys"
+        )
+        self.assertEqual(result, 0)
+        call_dbus.assert_called_once_with("Commit", '{"effect.dim_factor": 0.5}')
+
+        result, _, _, _ = self._run_client(
+            ["config", "set", "effect.dim_factor", "99"],
+            "error: nothing to commit (rejected: value 99 exceeds maximum)",
+        )
+        self.assertEqual(result, 1)
+
+        result, _, _, call_dbus = self._run_client(
+            ["config", "preview", "effect.dim_factor", "0.3"], "preview applied"
+        )
+        self.assertEqual(result, 0)
+        call_dbus.assert_called_once_with("Preview", '{"effect.dim_factor": 0.3}')
 
 
 if __name__ == "__main__":

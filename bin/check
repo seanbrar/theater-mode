@@ -4,17 +4,17 @@
 
 set -euo pipefail
 
+die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
-
-export PYTHONPATH="src"
 
 echo "[check] Building the Wayland dimmer..."
 make -C src/theater_mode/dimmer clean >/dev/null
 make -C src/theater_mode/dimmer CFLAGS="-O2 -Wall -Wextra -pedantic -Werror" >/dev/null
 
 echo "[check] Verifying config.reference.toml matches the schema..."
-python3 -c '
+PYTHONPATH="$REPO_DIR/src" python3 -c '
 import sys
 from pathlib import Path
 from theater_mode.config import generate_reference_config
@@ -24,10 +24,9 @@ if current != generate_reference_config():
 '
 
 echo "[check] Running unit tests..."
-python3 -m unittest discover -s tests -q
+python3 -m unittest discover -s tests -t . -q
 
-# Prefer a system ruff; fall back to uvx so the checks run either way. uv is dev
-# tooling only and is never required by install.sh or the daemon at runtime.
+# Prefer system ruff; fall back to uvx or uv tool run.
 if command -v ruff >/dev/null 2>&1; then
     RUFF=(ruff)
 elif command -v uvx >/dev/null 2>&1; then
@@ -43,7 +42,8 @@ if [ ${#RUFF[@]} -gt 0 ]; then
     "${RUFF[@]}" check .
     "${RUFF[@]}" format --check .
 else
-    echo "[check] Skipping ruff: install it, or install uv for 'uvx ruff'."
+    echo "[check] Build, config, and tests passed." >&2
+    die "ruff not run: no 'ruff' and no 'uv' on PATH. Install either so lint and formatting are checked."
 fi
 
 echo "[check] All checks passed cleanly."

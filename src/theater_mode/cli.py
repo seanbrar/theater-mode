@@ -8,28 +8,21 @@ import signal
 import sys
 from pathlib import Path
 
-import gi
-
-gi.require_version("Gio", "2.0")
-gi.require_version("GLib", "2.0")
-gi.require_version("GLibUnix", "2.0")
-from gi.repository import Gio, GLib, GLibUnix  # noqa: E402
-
-from theater_mode import __version__  # noqa: E402
-from theater_mode.config import (  # noqa: E402
+from theater_mode import __version__
+from theater_mode.config import (
     DevConfig,
     get_dev_config,
     load_resolved_config,
 )
-from theater_mode.constants import (  # noqa: E402
+from theater_mode.constants import (
     BUS_NAME,
     INTERFACE,
     INTERFACE_XML,
     OBJECT_PATH,
 )
-from theater_mode.daemon import Daemon  # noqa: E402
-from theater_mode.effects import EFFECTS, EffectOptions  # noqa: E402
-from theater_mode.service import make_handler  # noqa: E402
+from theater_mode.daemon import Daemon
+from theater_mode.effects import EFFECTS, EffectOptions
+from theater_mode.service import make_handler
 
 log = logging.getLogger("theater-moded")
 
@@ -106,6 +99,13 @@ def main(argv: list[str] | None = None) -> int:
         dev_config=dev_config,
     )
 
+    import gi
+
+    gi.require_version("Gio", "2.0")
+    gi.require_version("GLib", "2.0")
+    gi.require_version("GLibUnix", "2.0")
+    from gi.repository import Gio, GLib, GLibUnix
+
     loop = GLib.MainLoop()
 
     def shutdown(*_: object) -> bool:
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
     def on_bus_acquired(conn: Gio.DBusConnection, name: str, *_: object) -> None:
         active_connection.append(conn)
         registration["id"] = conn.register_object_with_closures2(
-            OBJECT_PATH, node.interfaces[0], make_handler(daemon), None, None
+            OBJECT_PATH, node.interfaces[0], make_handler(daemon, GLib.Variant), None, None
         )
         log.info("listening on %s as %s (effect: %s)", OBJECT_PATH, name, effect.name)
 

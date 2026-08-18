@@ -6,14 +6,9 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-import gi
-
-gi.require_version("GLib", "2.0")
-from gi.repository import GLib  # noqa: E402
-
-from theater_mode.config import (  # noqa: E402
+from theater_mode.config import (
     DevConfig,
     Diagnostic,
     ResolvedConfig,
@@ -21,12 +16,48 @@ from theater_mode.config import (  # noqa: E402
     load_resolved_config,
     validate_updates,
 )
-from theater_mode.display.drm import connected_outputs, output_identities  # noqa: E402
-from theater_mode.effects.base import Effect, EffectOptions  # noqa: E402
-from theater_mode.steam import steam_appid_for_window  # noqa: E402
-from theater_mode.utils import parse_bool, parse_int  # noqa: E402
+from theater_mode.display.drm import connected_outputs, output_identities
+from theater_mode.effects.base import Effect, EffectOptions
+from theater_mode.steam import steam_appid_for_window
+from theater_mode.utils import parse_bool, parse_int
 
 log = logging.getLogger("theater-moded")
+
+
+class TimerScheduler(Protocol):
+    """Abstraction for scheduling and cancelling timer callbacks."""
+
+    def timeout_add(self, delay_ms: int, callback: Callable[[], None]) -> Any:
+        """Schedule a callback after delay_ms. Returns a cancellation token."""
+        ...
+
+    def source_remove(self, tag: Any) -> None:
+        """Cancel a pending timer callback."""
+        ...
+
+
+class GLibTimerScheduler:
+    """Production timer scheduler using GLib's event loop."""
+
+    def timeout_add(self, delay_ms: int, callback: Callable[[], None]) -> Any:
+        import gi
+
+        gi.require_version("GLib", "2.0")
+        from gi.repository import GLib
+
+        def _wrapper() -> bool:
+            callback()
+            return False
+
+        return GLib.timeout_add(delay_ms, _wrapper)
+
+    def source_remove(self, tag: Any) -> None:
+        import gi
+
+        gi.require_version("GLib", "2.0")
+        from gi.repository import GLib
+
+        GLib.source_remove(tag)
 
 
 @dataclass
@@ -56,18 +87,20 @@ class Daemon:
         diagnostics: list[Diagnostic] | None = None,
         dev_config: DevConfig | None = None,
         on_config_changed: Callable[[], None] | None = None,
+        scheduler: TimerScheduler | None = None,
     ) -> None:
         self.effect = effect
         self.config = config or ResolvedConfig()
         self.diagnostics = diagnostics or []
         self.dev_config = dev_config
         self.on_config_changed = on_config_changed
+        self.scheduler: TimerScheduler = scheduler or GLibTimerScheduler()
         self.windows: dict[str, TrackedWindow] = {}
         self.active_output: str | None = None
         self._applied_others: list[str] | None = None
         self._snapshot: set[str] | None = None
-        self._pending_revert: int | None = None
-        self._pending_stage: int | None = None
+        self._pending_revert: Any | None = None
+        self._pending_stage: Any | None = None
         self._session_overrides: dict[str, Any] = {}
 
         # Sync effect options on startup
@@ -104,7 +137,7 @@ class Daemon:
             if self.active_output is not None and self._pending_revert is None:
                 if self.revert_delay > 0:
                     log.info("no game windows left; reverting in %.1fs", self.revert_delay)
-                    self._pending_revert = GLib.timeout_add(
+                    self._pending_revert = self.scheduler.timeout_add(
                         int(self.revert_delay * 1000), self._revert_now
                     )
                 else:
@@ -136,7 +169,9 @@ class Daemon:
             stage.output,
             self.stage_delay,
         )
-        self._pending_stage = GLib.timeout_add(int(self.stage_delay * 1000), self._confirm_stage)
+        self._pending_stage = self.scheduler.timeout_add(
+            int(self.stage_delay * 1000), self._confirm_stage
+        )
 
     def _follow_output_changes(self, stage: TrackedWindow) -> None:
         """Re-apply effect if display topology changed while game is running."""
@@ -160,18 +195,17 @@ class Daemon:
             return None
         return next((w for w in games if w.fullscreen), games[0])
 
-    def _confirm_stage(self) -> bool:
+    def _confirm_stage(self) -> None:
         """Confirm stage transition after stability timeout."""
         self._pending_stage = None
         stage = self._stage(self.game_windows())
         if stage is None or stage.output == self.active_output:
             log.info("game did not stay on new screen; leaving theater mode where it is")
-            return GLib.SOURCE_REMOVE
+            return
 
         log.info("game moved from %s to %s; re-applying", self.active_output, stage.output)
         self.effect.revert()
         self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
-        return GLib.SOURCE_REMOVE
 
     def _commit_stage(self, output: str, appid: str, resource_class: str) -> None:
         """Commit effect application to target output."""
@@ -189,24 +223,23 @@ class Daemon:
 
     def _cancel_pending_stage(self) -> None:
         if self._pending_stage is not None:
-            GLib.source_remove(self._pending_stage)
+            self.scheduler.source_remove(self._pending_stage)
             self._pending_stage = None
 
-    def _revert_now(self, immediate: bool = False) -> bool:
+    def _revert_now(self, immediate: bool = False) -> None:
         """Execute immediate effect reversion."""
         self._pending_revert = None
         if self.active_output is None:
-            return GLib.SOURCE_REMOVE
+            return
         log.info("reverting")
         self.effect.revert(immediate=immediate)
         self.active_output = None
         self._applied_others = None
-        return GLib.SOURCE_REMOVE
 
     def _cancel_pending_revert(self) -> None:
         if self._pending_revert is None:
             return
-        GLib.source_remove(self._pending_revert)
+        self.scheduler.source_remove(self._pending_revert)
         self._pending_revert = None
         log.info("a game window returned within %.1fs; staying in theater mode", self.revert_delay)
 

@@ -26,8 +26,9 @@ DOC="$DATA_DIR/theater-mode/README.md"
 REF_CONFIG="$DATA_DIR/theater-mode/config.reference.toml"
 APP_DATA="$DATA_DIR/theater-mode"
 
-MODE=copy
+MODE="copy"
 FORCE=0
+SERVICE=1  # 1 = enable/start systemd service; 0 (--no-service) = stage files only
 
 # --------------------------------------------------------------------------
 
@@ -45,6 +46,7 @@ Usage:
 Options:
   -l, --link       Symlink files into place instead of copying (for development)
   -u, --uninstall  Remove installed binaries, KWin script, and systemd unit
+  -n, --no-service Stage files only; do not reload, enable, or start the user service
   -y, --yes        Answer yes to uninstall confirmation prompts non-interactively
   -h, --help       Show this help message
 EOF
@@ -56,12 +58,56 @@ place() {
     [ -e "$src" ] || die "missing from repo: $src"
     mkdir -p "$(dirname "$dest")" || die "could not create $(dirname "$dest")"
     rm -rf "$dest"
-    if [ "$MODE" = link ]; then
+    if [ "$MODE" = "link" ]; then
         ln -s "$src" "$dest" || die "could not link $dest"
     else
         cp -r "$src" "$dest" || die "could not copy to $dest"
     fi
     info "$dest"
+}
+
+# Render systemd unit template with the target daemon binary path.
+render_unit() {
+    local src="$REPO/systemd/theater-mode.service"
+    local escaped tmp line rendered=0
+    [ -e "$src" ] || die "missing from repo: $src"
+    mkdir -p "$(dirname "$UNIT")" || die "could not create $(dirname "$UNIT")"
+    case "$DAEMON" in
+        *$'\n'*|*$'\r'*) die "XDG_BIN_HOME must not contain newlines" ;;
+    esac
+
+    # Quote systemd syntax without passing the path through a text-substitution language.
+    escaped=${DAEMON//\\/\\\\}
+    escaped=${escaped//\"/\\\"}
+    escaped=${escaped//%/%%}
+    escaped=${escaped//\$/\$\$}
+    tmp=$(mktemp "${UNIT}.tmp.XXXXXX") || die "could not create temporary unit"
+    if ! while IFS= read -r line || [ -n "$line" ]; do
+        if [ "$line" = 'ExecStart=/usr/bin/env -- "@DAEMON@"' ]; then
+            printf 'ExecStart=/usr/bin/env -- "%s"\n' "$escaped"
+            rendered=$((rendered + 1))
+        else
+            printf '%s\n' "$line"
+        fi
+    done < "$src" > "$tmp"; then
+        rm -f "$tmp"
+        die "could not render $UNIT"
+    fi
+    if [ "$rendered" -ne 1 ]; then
+        rm -f "$tmp"
+        die "expected exactly one daemon placeholder in $src"
+    fi
+    mv -f "$tmp" "$UNIT" || { rm -f "$tmp"; die "could not write $UNIT"; }
+    info "$UNIT"
+}
+
+# Remove dimmer source/binary and bytecode cache from copy-installed lib directory.
+prune_package_copy() {
+    if [ "$MODE" = "link" ]; then
+        return 0
+    fi
+    rm -rf "$APP_DATA/lib/theater_mode/dimmer"
+    find "$APP_DATA/lib/theater_mode" -type d -name __pycache__ -prune -exec rm -rf {} +
 }
 
 check_prerequisites() {
@@ -74,7 +120,9 @@ check_prerequisites() {
     command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
     command -v make >/dev/null || missing+=("make")
     command -v pkg-config >/dev/null || missing+=("pkg-config")
-    command -v systemctl >/dev/null || missing+=("systemctl")
+    if [ "$SERVICE" -eq 1 ]; then
+        command -v systemctl >/dev/null || missing+=("systemctl")
+    fi
 
     if command -v python3 >/dev/null; then
         python3 -c 'import gi; gi.require_version("Gio", "2.0"); gi.require_version("GLib", "2.0")' 2>/dev/null \
@@ -119,8 +167,9 @@ do_install() {
     place "$REPO/bin/theater-mode" "$CLIENT"
     chmod +x "$CLIENT"
     place "$REPO/src/theater_mode" "$APP_DATA/lib/theater_mode"
+    prune_package_copy
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
-    place "$REPO/systemd/theater-mode.service" "$UNIT"
+    render_unit
     place "$REPO/README.md" "$DOC"
 
     # The reference config is generated from the schema, never hand-maintained.
@@ -130,6 +179,20 @@ do_install() {
 from theater_mode.config import generate_reference_config
 sys.stdout.write(generate_reference_config())' > "$REF_CONFIG" \
         || die "failed to generate $REF_CONFIG"
+
+    if [ "$SERVICE" -eq 0 ]; then
+        cat <<EOF
+
+theater-mode staged successfully (--no-service: nothing was activated).
+
+The unit is installed but not enabled or started. To activate it:
+  systemctl --user daemon-reload
+  systemctl --user enable --now theater-mode.service
+
+Reference:     $REF_CONFIG
+EOF
+        return 0
+    fi
 
     systemctl --user daemon-reload || die "systemctl daemon-reload failed"
     systemctl --user enable theater-mode.service >/dev/null 2>&1 \
@@ -181,9 +244,13 @@ do_uninstall() {
         [ "$reply" = y ] || [ "$reply" = Y ] || { echo "Cancelled."; return 0; }
     fi
 
-    systemctl --user disable --now theater-mode.service >/dev/null 2>&1 || true
+    if [ "$SERVICE" -eq 1 ]; then
+        systemctl --user disable --now theater-mode.service >/dev/null 2>&1 || true
+    fi
     rm -rf "${targets[@]}"
-    systemctl --user daemon-reload || true
+    if [ "$SERVICE" -eq 1 ]; then
+        systemctl --user daemon-reload || true
+    fi
 
     # Attempt to notify KWin if running
     if command -v busctl >/dev/null 2>&1; then
@@ -201,8 +268,9 @@ do_uninstall() {
 ACTION="install"
 while [ $# -gt 0 ]; do
     case "$1" in
-        -l|--link)       MODE=link ;;
+        -l|--link)       MODE="link" ;;
         -u|--uninstall)  ACTION="uninstall" ;;
+        -n|--no-service) SERVICE=0 ;;
         -y|--yes|-f|--force) FORCE=1 ;;
         -h|--help)       show_help; exit 0 ;;
         *)               die "unknown option: $1 (try --help)" ;;
@@ -215,4 +283,3 @@ if [ "$ACTION" = "uninstall" ]; then
 else
     do_install
 fi
-

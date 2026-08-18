@@ -7,20 +7,20 @@ import os
 import sys
 from pathlib import Path
 
-# Resolve the theater_mode package:
-# 1. Check relative repository src/ directory (running from repository or symlink)
-# 2. Check XDG data library directory (installed copy)
-REPO_SRC = Path(__file__).resolve().parent.parent / "src"
+# Locate the theater_mode package: prefer repo src/ if running from a checkout,
+# otherwise fall back to installed XDG data directory.
+REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_LIB = (
-    Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    / "theater-mode"
-    / "lib"
+    Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "theater-mode" / "lib"
 )
 
-if REPO_SRC.is_dir() and str(REPO_SRC) not in sys.path:
-    sys.path.insert(0, str(REPO_SRC))
-elif DATA_LIB.is_dir() and str(DATA_LIB) not in sys.path:
-    sys.path.insert(0, str(DATA_LIB))
+candidates = [DATA_LIB]
+if (REPO_ROOT / "pyproject.toml").is_file():
+    candidates.insert(0, REPO_ROOT / "src")
+for candidate in candidates:
+    if (candidate / "theater_mode" / "__init__.py").is_file():
+        sys.path.insert(0, str(candidate))
+        break
 
 from theater_mode.cli import main
 
