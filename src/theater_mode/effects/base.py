@@ -1,21 +1,36 @@
-"""Abstract base class for theater mode display effects."""
+"""Abstract base class and construction options for theater mode display effects."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from dataclasses import dataclass
+
+from theater_mode.constants import (
+    DEFAULT_DIM_CURVE,
+    DEFAULT_DIM_DURATION,
+    DEFAULT_DIM_FACTOR,
+)
+
+
+@dataclass(frozen=True)
+class EffectOptions:
+    """Configuration options passed to effect initializers."""
+
+    dim_factor: float = DEFAULT_DIM_FACTOR
+    dim_duration: float = DEFAULT_DIM_DURATION
+    dim_curve: str = DEFAULT_DIM_CURVE
+    art: bool = True
 
 
 class Effect(ABC):
-    """Abstract base class for an effect applied to secondary displays."""
+    """Abstract base class for secondary display effects."""
 
     name: str = "none"
 
-    # Duration required for the effect to physically take effect on displays.
-    # Non-zero durations indicate gradual transitions (e.g. hardware brightness ramp),
-    # allowing composite pipelines to coordinate instant actions (like wallpaper swaps)
-    # when the screens are darkest.
-    transition_seconds: float = 0.0
+    @classmethod
+    def create(cls, options: EffectOptions) -> Effect:
+        """Instantiate an effect from configuration options."""
+        return cls()
 
     @abstractmethod
     def apply(self, game_output: str, other_outputs: list[str], appid: str) -> None:
@@ -29,10 +44,3 @@ class Effect(ABC):
 
     def cancel_pending(self) -> None:
         """Cancel any queued asynchronous or timed transitions without reverting active state."""
-
-    def saved_state(self) -> dict[str, Any] | None:
-        """Return state snapshot required for crash recovery, or None if no changes applied."""
-        return None
-
-    def recover(self, saved: dict[str, Any]) -> None:
-        """Restore display state left behind by a previous abnormal termination or crash."""

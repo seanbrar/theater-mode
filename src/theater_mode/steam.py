@@ -65,17 +65,18 @@ def find_hero_art(appid: str) -> Path | None:
     return max(candidates, key=lambda p: p.stat().st_size)
 
 
-def build_wallpaper(appid: str, width: int, height: int) -> Path | None:
-    """Generate and cache a composite wallpaper from Steam hero art at target resolution.
+def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Path | None:
+    """Generate and cache a raw ARGB8888 composite from Steam hero art at target resolution.
 
-    The 1920x620 hero artwork is overlaid on a blurred, darkened ambient background
-    with feathered horizontal seams to match the monitor's native aspect ratio.
+    Overlays hero artwork onto a blurred, darkened ambient background with feathered
+    edges, baking dim_factor directly into image brightness for the dimmer helper.
     """
     source = find_hero_art(appid)
     if source is None:
         return None
 
-    target = ART_CACHE / f"{appid}-{width}x{height}.jpg"
+    brightness = max(0.0, min(1.0, 1.0 - dim_factor))
+    target = ART_CACHE / f"{appid}-{width}x{height}-d{round(dim_factor * 100):03d}.argb"
     if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
         return target
 
@@ -109,12 +110,17 @@ def build_wallpaper(appid: str, width: int, height: int) -> Path | None:
             mask.paste(fade.point(lambda v: 255 - v), (0, fg_height - feather))
 
             backdrop.paste(foreground, (0, (height - fg_height) // 2), mask)
+            backdrop = ImageEnhance.Brightness(backdrop).enhance(brightness)
+
+            raw = backdrop.convert("RGBA").tobytes("raw", "BGRA")
 
             ART_CACHE.mkdir(parents=True, exist_ok=True)
-            backdrop.save(target, "JPEG", quality=90)
+            tmp = target.with_suffix(".tmp")
+            tmp.write_bytes(raw)
+            tmp.replace(target)
     except Exception:
-        log.exception("could not build wallpaper for appid %s", appid)
+        log.exception("could not build artwork for appid %s", appid)
         return None
 
-    log.debug("built wallpaper %s", target)
+    log.debug("built artwork %s (%dx%d, brightness %.2f)", target, width, height, brightness)
     return target

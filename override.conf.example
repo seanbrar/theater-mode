@@ -1,33 +1,37 @@
-# Example settings drop-in.
+# Example systemd drop-in configuration for theater-mode.service.
 #
-# Do not copy this file into place by hand — create the real one with:
-#
+# To apply custom settings, run:
 #   systemctl --user edit theater-mode.service
 #
-# which writes ~/.config/systemd/user/theater-mode.service.d/override.conf and
-# reloads systemd for you. Only include the values you actually want to change;
-# anything omitted falls back to the defaults in theater-mode.service.
+# This creates ~/.config/systemd/user/theater-mode.service.d/override.conf and
+# reloads the systemd manager configuration. Only include variables you wish
+# to override; omitted variables will use defaults from theater-mode.service.
 #
-# Every setting is documented in README.md.
+# Full documentation is available in README.md.
 
 [Service]
 
-# log (dry run) | brightness | wallpaper — comma separated to combine
-Environment=THEATER_EFFECT=brightness,wallpaper
+# Active effect: 'dim' (Wayland fade with game artwork) or 'log' (dry run).
+Environment=THEATER_EFFECT=dim
 
-# Fraction of each screen's own brightness to dim to. Lower is darker.
-Environment=THEATER_DIM_FACTOR=0.20
+# Fraction of secondary display brightness to reduce (0.0 to 1.0; higher is darker).
+# When artwork is enabled, this scales artwork image brightness directly.
+Environment=THEATER_DIM_FACTOR=0.85
 
-# How long a brightness change takes to reach the monitor. Not a fade: it times
-# the wallpaper switch so it lands once the screens have actually darkened.
-Environment=THEATER_SETTLE_SECONDS=1.5
+# Duration of the fade transition in seconds.
+Environment=THEATER_DIM_DURATION=2.0
 
-# How long a game must stay on a new screen before the effect follows it.
+# Easing curve for fades: sine | quad | cubic | linear
+Environment=THEATER_DIM_CURVE=sine
+
+# Artwork display on secondary screens: --art (show game artwork) | --no-art (flat black)
+Environment=THEATER_ART=--art
+
+# Stability delay (seconds) before following a game to a new display.
 Environment=THEATER_STAGE_DELAY=1.5
 
-# Grace period before restoring, so a launcher handing off to the game does not
-# flash the other screens.
+# Grace period (seconds) before restoring displays after game windows close (0 disables).
 Environment=THEATER_REVERT_DELAY=3
 
-# Uncomment to log every window event, not just games.
+# Uncomment to enable verbose debug logging for all window events.
 # Environment=THEATER_VERBOSE=--verbose

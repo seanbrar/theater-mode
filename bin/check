@@ -7,13 +7,14 @@ set -euo pipefail
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-# Include Homebrew in PATH if present and not already exported
-if [ -d "/home/linuxbrew/.linuxbrew/bin" ]; then
-    export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
-fi
+export PYTHONPATH="src"
+
+echo "[check] Building the Wayland dimmer..."
+make -C src/theater_mode/dimmer clean >/dev/null
+make -C src/theater_mode/dimmer CFLAGS="-O2 -Wall -Wextra -pedantic -Werror" >/dev/null
 
 echo "[check] Running unit tests..."
-PYTHONPATH=src python3 -m unittest discover -s tests -q
+python3 -m unittest discover -s tests -q
 
 if command -v ruff >/dev/null 2>&1; then
     echo "[check] Running ruff..."

@@ -11,14 +11,20 @@ BUS_NAME = "org.theatermode.TheaterMode"
 OBJECT_PATH = "/org/theatermode/TheaterMode"
 INTERFACE = "org.theatermode.TheaterMode"
 
-# Persistent State Paths (for crash recovery)
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "theater-mode"
-STATE_FILE = STATE_DIR / "pending.json"
-
 # Steam & Artwork Cache Paths
-STEAM_LIBRARY_CACHE = Path.home() / ".local/share/Steam/appcache/librarycache"
+STEAM_LIBRARY_CACHE = (
+    Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
+    / "Steam"
+    / "appcache"
+    / "librarycache"
+)
 ART_CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "theater-mode"
-IMAGE_PLUGIN = "org.kde.image"
+
+# Wayland Dimmer Defaults
+DEFAULT_DIM_FACTOR = 0.85
+DEFAULT_DIM_DURATION = 2.0
+DEFAULT_DIM_CURVE = "sine"
+DIMMER_BINARY_NAME = "theater-dimmer"
 
 # Steam Detection Patterns
 STEAM_APP_CLASS = re.compile(r"^steam_app_(\d+)$")

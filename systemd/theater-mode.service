@@ -1,29 +1,28 @@
 [Unit]
-Description=Theater mode daemon (dims other screens while a Steam game is on one)
+Description=Theater mode daemon (dims secondary screens while a Steam game is active)
 PartOf=graphical-session.target
 After=plasma-workspace.target
 
 [Service]
 Type=simple
-# Switch effects without editing this file:
+# Configure overrides via drop-in:
 #   systemctl --user edit theater-mode.service
-# then add:
-#   [Service]
-#   Environment=THEATER_EFFECT=brightness
-# and: systemctl --user restart theater-mode.service
 Environment=THEATER_EFFECT=log
-Environment=THEATER_DIM_FACTOR=0.35
+Environment=THEATER_DIM_FACTOR=0.85
+Environment=THEATER_DIM_DURATION=2.0
+Environment=THEATER_DIM_CURVE=sine
+Environment=THEATER_ART=--art
 Environment=THEATER_REVERT_DELAY=3
-Environment=THEATER_SETTLE_SECONDS=1.5
 Environment=THEATER_STAGE_DELAY=1.5
-# Unbraced on purpose: an empty $THEATER_VERBOSE expands to no argument at all,
-# while ${THEATER_VERBOSE} would pass an empty string and fail argument parsing.
+# Unbraced variables expand to no arguments when empty:
 Environment=THEATER_VERBOSE=
 ExecStart=%h/.local/bin/theater-moded \
     --effect ${THEATER_EFFECT} \
     --dim-factor ${THEATER_DIM_FACTOR} \
+    --dim-duration ${THEATER_DIM_DURATION} \
+    --dim-curve ${THEATER_DIM_CURVE} \
+    $THEATER_ART \
     --revert-delay ${THEATER_REVERT_DELAY} \
-    --settle-seconds ${THEATER_SETTLE_SECONDS} \
     --stage-delay ${THEATER_STAGE_DELAY} \
     $THEATER_VERBOSE
 Restart=on-failure

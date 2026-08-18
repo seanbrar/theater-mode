@@ -11,3 +11,11 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Build & binaries
+theater-dimmer
+*.o
+*.so
+
+# Local maintainer files & overrides
+.local/

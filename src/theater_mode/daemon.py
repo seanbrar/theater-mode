@@ -1,4 +1,4 @@
-"""Daemon core, state machine, window tracking, and crash persistence."""
+"""Daemon core, state machine, and window tracking."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import gi
 gi.require_version("GLib", "2.0")
 from gi.repository import GLib  # noqa: E402
 
-from theater_mode.constants import STATE_DIR, STATE_FILE
 from theater_mode.display.drm import connected_outputs
 from theater_mode.effects.base import Effect
 from theater_mode.steam import steam_appid_for_window
@@ -43,14 +42,11 @@ class Daemon:
 
     effect: Effect
     require_fullscreen: bool = False
-    # Debounce period (seconds) before reverting after all game windows close.
-    # Prevents display flashing during launcher handover (e.g. Deltarune, multi-stage launchers).
     revert_delay: float = 3.0
-    # Stability delay (seconds) required before moving theater mode to a new display output.
-    # Guards against transient windows opened across secondary displays during startup/shutdown.
     stage_delay: float = 1.5
     windows: dict[str, TrackedWindow] = field(default_factory=dict)
     active_output: str | None = None
+    _applied_others: list[str] | None = None
     _snapshot: set[str] | None = None
     _pending_revert: int | None = None
     _pending_stage: int | None = None
@@ -85,8 +81,11 @@ class Daemon:
         self._cancel_pending_revert()
 
         stage = self._stage(games)
-        if stage is None or stage.output == self.active_output:
+        if stage is None:
+            return
+        if stage.output == self.active_output:
             self._cancel_pending_stage()
+            self._follow_output_changes(stage)
             return
 
         if self.active_output is None:
@@ -104,6 +103,22 @@ class Daemon:
             self.stage_delay,
         )
         self._pending_stage = GLib.timeout_add(int(self.stage_delay * 1000), self._confirm_stage)
+
+    def _follow_output_changes(self, stage: TrackedWindow) -> None:
+        """Re-apply effect if display topology changed while game is running."""
+        others = self._other_outputs(stage.output)
+        if others == self._applied_others:
+            return
+
+        log.info(
+            "display set changed while a game was running (%s -> %s); re-applying",
+            ", ".join(self._applied_others or []) or "none",
+            ", ".join(others) or "none",
+        )
+        self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
+
+    def _other_outputs(self, game_output: str) -> list[str]:
+        return sorted({o for o in self.all_outputs() if o != game_output})
 
     def _stage(self, games: list[TrackedWindow]) -> TrackedWindow | None:
         """Determine primary game window defining active display focus (fullscreen preferred)."""
@@ -126,7 +141,7 @@ class Daemon:
 
     def _commit_stage(self, output: str, appid: str, resource_class: str) -> None:
         """Commit effect application to target output."""
-        others = sorted({o for o in self.all_outputs() if o != output})
+        others = self._other_outputs(output)
         log.info(
             "game detected: appid=%s class=%s on %s (other outputs: %s)",
             appid,
@@ -136,7 +151,7 @@ class Daemon:
         )
         self.effect.apply(output, others, appid)
         self.active_output = output
-        self._persist()
+        self._applied_others = others
 
     def _cancel_pending_stage(self) -> None:
         if self._pending_stage is not None:
@@ -151,7 +166,7 @@ class Daemon:
         log.info("reverting")
         self.effect.revert(immediate=immediate)
         self.active_output = None
-        self._persist()
+        self._applied_others = None
         return GLib.SOURCE_REMOVE
 
     def _cancel_pending_revert(self) -> None:
@@ -167,45 +182,6 @@ class Daemon:
         outputs.update(connected_outputs())
         return outputs
 
-    # -- Crash Recovery & State Persistence --------------------------------
-
-    def _persist(self) -> None:
-        """Persist active state atomically to disk for crash recovery."""
-        state = self.effect.saved_state()
-        try:
-            if state is None:
-                STATE_FILE.unlink(missing_ok=True)
-                return
-            STATE_DIR.mkdir(parents=True, exist_ok=True)
-            payload = {"effect": self.effect.name, "state": state}
-            tmp = STATE_FILE.with_suffix(".tmp")
-            tmp.write_text(json.dumps(payload))
-            tmp.replace(STATE_FILE)
-        except OSError as exc:
-            log.error("could not persist state: %s", exc)
-
-    def recover(self) -> None:
-        """Revert uncleaned state left behind by an abnormal termination."""
-        try:
-            payload = json.loads(STATE_FILE.read_text())
-        except FileNotFoundError:
-            return
-        except (OSError, json.JSONDecodeError) as exc:
-            log.error("unreadable state file, removing: %s", exc)
-            STATE_FILE.unlink(missing_ok=True)
-            return
-
-        if payload.get("effect") != self.effect.name:
-            log.warning(
-                "state left by effect %r but running %r; skipping recovery",
-                payload.get("effect"),
-                self.effect.name,
-            )
-            return
-
-        self.effect.recover(payload.get("state") or {})
-        STATE_FILE.unlink(missing_ok=True)
-
     # -- D-Bus Interface Handlers ------------------------------------------
 
     def window_opened(
@@ -220,7 +196,12 @@ class Daemon:
         parsed_pid = parse_int(pid)
         is_fullscreen = parse_bool(fullscreen)
         is_normal = parse_bool(normal)
-        appid = steam_appid_for_window(resource_class, parsed_pid)
+
+        known = self.windows.get(window_id)
+        if known is not None and (known.pid, known.resource_class) == (parsed_pid, resource_class):
+            appid = known.appid
+        else:
+            appid = steam_appid_for_window(resource_class, parsed_pid)
 
         window = TrackedWindow(
             window_id=window_id,
@@ -232,7 +213,6 @@ class Daemon:
             normal=is_normal,
         )
 
-        known = self.windows.get(window_id)
         self.windows[window_id] = window
         if self._snapshot is not None:
             self._snapshot.add(window_id)

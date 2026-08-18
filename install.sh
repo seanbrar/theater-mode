@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Install theater-mode into the user's home. Touches nothing outside $HOME and
-# needs no elevation — the atomic base system is deliberately left alone.
+# Install theater-mode into the user's home ($HOME) without elevation.
 #
 #   ./install.sh            copy the files into place
 #   ./install.sh --link     symlink them instead, so edits in this repo are live
@@ -18,6 +17,7 @@ BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 
+DIMMER_BIN="$BIN_DIR/theater-dimmer"
 DAEMON="$BIN_DIR/theater-moded"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
@@ -46,23 +46,43 @@ place() {
 
 check_prerequisites() {
     local missing=()
-    command -v kscreen-doctor >/dev/null || missing+=("kscreen-doctor (kscreen)")
+    command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
+    command -v make >/dev/null || missing+=("make")
+    command -v pkg-config >/dev/null || missing+=("pkg-config")
     command -v systemctl >/dev/null || missing+=("systemctl")
     python3 -c 'import gi; gi.require_version("Gio", "2.0")' 2>/dev/null \
         || missing+=("python3 gobject bindings (python3-gobject)")
+
+    # Check libwayland client development headers required to compile theater-dimmer
+    if command -v pkg-config >/dev/null; then
+        pkg-config --exists wayland-client \
+            || missing+=("libwayland client development files (wayland-devel / libwayland-dev)")
+    fi
+
     if [ ${#missing[@]} -gt 0 ]; then
         printf 'missing prerequisites:\n' >&2
         printf '  - %s\n' "${missing[@]}" >&2
-        die "install those first"
+        die "please install missing dependencies"
     fi
+
+    # Pillow is optional; without it, secondary screens dim to plain black without artwork
+    python3 -c 'import PIL' 2>/dev/null || cat >&2 <<'EOF'
+warning: python3-pillow is not installed. Game artwork cannot be generated,
+         so secondary displays will dim to plain black.
+EOF
 }
 
 do_install() {
     check_prerequisites
 
-    echo "Installing theater-mode ($MODE):"
+    echo "Building theater-dimmer:"
+    make -C "$REPO/src/theater_mode/dimmer"
+
+    echo "Installing theater-mode ($MODE mode):"
+    place "$REPO/src/theater_mode/dimmer/theater-dimmer" "$DIMMER_BIN"
+    chmod +x "$DIMMER_BIN"
     place "$REPO/bin/theater-moded" "$DAEMON"
-    chmod +x "$REPO/bin/theater-moded"
+    chmod +x "$DAEMON"
     place "$REPO/src/theater_mode" "$DATA_DIR/theater-mode/lib/theater_mode"
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
     place "$REPO/systemd/theater-mode.service" "$UNIT"
@@ -75,32 +95,28 @@ do_install() {
 
     cat <<EOF
 
-Installed. The daemon is running in dry-run mode: it logs what it would do and
-changes nothing until you ask it to.
+theater-mode installed.
 
-Two steps left, both yours:
+Next steps:
+  1. Enable the KWin script:
+     System Settings -> Window Management -> KWin Scripts -> "Theater Mode Detector"
 
-  1. Enable the detector:
-       System Settings -> Window Management -> KWin Scripts -> "Theater Mode Detector"
+  2. Configure an effect (default is dry-run 'log'):
+     systemctl --user edit theater-mode.service
 
-  2. Turn on a real effect:
-       systemctl --user edit theater-mode.service
+     [Service]
+     Environment=THEATER_EFFECT=dim
 
-     add:
-       [Service]
-       Environment=THEATER_EFFECT=brightness,wallpaper
+     systemctl --user restart theater-mode.service
 
-     then:
-       systemctl --user restart theater-mode.service
-
-Watch it work:  journalctl --user -u theater-mode.service -f
-Settings:       $DOC
+Logs:          journalctl --user -u theater-mode.service -f
+Documentation: $DOC
 EOF
 }
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$DOC" "$DATA_DIR/theater-mode/lib")
+    local targets=("$DIMMER_BIN" "$DAEMON" "$KWIN_SCRIPT" "$UNIT" "$DOC" "$DATA_DIR/theater-mode/lib")
     local found=0
     for t in "${targets[@]}"; do
         if [ -e "$t" ] || [ -L "$t" ]; then
@@ -114,10 +130,9 @@ do_uninstall() {
     fi
 
     echo
-    echo "Your settings drop-in, cached artwork and saved state are NOT touched:"
+    echo "Settings drop-ins and cache directories will not be removed:"
     info "$CONF_DIR/systemd/user/theater-mode.service.d/"
     info "${XDG_CACHE_HOME:-$HOME/.cache}/theater-mode/"
-    info "${XDG_STATE_HOME:-$HOME/.local/state}/theater-mode/"
     echo
     read -r -p "Remove the $found item(s) above? [y/N] " reply
     [ "$reply" = y ] || [ "$reply" = Y ] || { echo "Cancelled."; return 0; }
@@ -129,13 +144,13 @@ do_uninstall() {
     systemctl --user daemon-reload || true
 
     echo
-    echo "Removed. Disable \"Theater Mode Detector\" in System Settings -> KWin Scripts to finish."
+    echo "Uninstalled. Remember to disable \"Theater Mode Detector\" in System Settings -> KWin Scripts."
 }
 
 case "${1:-}" in
     "")           do_install ;;
     --link)       MODE=link; do_install ;;
     --uninstall)  do_uninstall ;;
-    -h|--help)    sed -n '3,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    -h|--help)    sed -n '3,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
     *)            die "unknown option: $1 (try --help)" ;;
 esac

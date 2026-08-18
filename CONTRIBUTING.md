@@ -11,7 +11,9 @@ This guide outlines our development workflow, coding standards, and commit messa
 ### Prerequisites
 
 * **Python 3.10+** with `PyGObject` bindings (`python3-gobject` or `pygobject`)
-* **KDE Plasma 6 on Wayland** with `kscreen-doctor`
+* **Pillow** (`python3-pillow`) — optional, needed for game artwork
+* **A C compiler, `make`, and libwayland** (`wayland-devel` / `libwayland-dev`) to build the dimmer
+* **KDE Plasma 6 on Wayland**
 * **Ruff** (recommended for local linting and formatting)
 
 ### Local Setup & Live Testing
@@ -38,8 +40,9 @@ Before committing, run the fast repository check script:
 ```
 
 This runs:
-1. The full unit test suite via `unittest`.
-2. Ruff linter (`ruff check .`) and code formatter check (`ruff format --check .`).
+1. A build of `theater-dimmer` with `-Werror`.
+2. The full unit test suite via `unittest`.
+3. Ruff linter (`ruff check .`) and code formatter check (`ruff format --check .`).
 
 You can also install `bin/check` as a git pre-commit hook:
 
@@ -55,7 +58,7 @@ ln -sf ../../bin/check .git/hooks/pre-commit
 * **Type Annotations**: Provide explicit type hints for all function signatures and class attributes.
 * **Docstrings**: Follow PEP 257 format (`"""Single-line summary."""` or summary followed by blank line and detailed notes).
 * **Formatting & Linting**: We use [Ruff](pyproject.toml) configured for 100-character line lengths and sorted imports (`isort`). Run `ruff format .` and `ruff check --fix .` to format code automatically.
-* **Modularity**: Keep hardware I/O (DRM connectors, `kscreen-doctor`, D-Bus) isolated from state tracking and heuristics so logic remains unit-testable without a physical compositor.
+* **Modularity**: Keep hardware I/O (DRM sysfs, the dimmer helper, D-Bus) isolated from state tracking and heuristics so logic remains unit-testable without a physical compositor.
 
 ---
 
@@ -85,8 +88,8 @@ We follow a **Modern Markdown Git style**: concise, imperative subjects with a b
 * **Approved Subsystems**:
   * `core:` — Package structure, shared abstractions, main runtime loop
   * `daemon:` — Lifecycle state machine, debouncing, snapshot sync
-  * `effects:` — Brightness, wallpaper, composite effect pipelines
-  * `display:` — DRM connector detection, kscreen-doctor, Plasma scripting
+  * `effects:` — The dimmer helper, artwork, and effect construction
+  * `display:` — DRM connector and mode detection
   * `steam:` — AppID detection, process inspection, gamescope heuristics
   * `kwin:` — The KWin detection script (`theater-detect`)
   * `install:` — `install.sh`, systemd units, packaging
@@ -100,7 +103,7 @@ We follow a **Modern Markdown Git style**: concise, imperative subjects with a b
 * **Non-trivial changes** should include a body that explains:
   1. **The problem / motivation**: What behavior was broken, unhandled, or missing?
   2. **The "Why" over "What"**: The diff already shows *what* changed; the commit message explains *why* this specific architecture or approach was chosen.
-  3. **Compositor & Hardware quirks**: Document DDC/CI latency, Wayland/Plasma quirks, D-Bus type inference, or Linux sandbox namespaces.
+  3. **Compositor & Hardware quirks**: Document Wayland protocol constraints, Plasma quirks, D-Bus type inference, or Linux sandbox namespaces.
 * **Formatting**:
   * Write in **natural, soft-wrapped paragraphs** (separate paragraphs with a single blank line).
   * **Do not insert manual hard line breaks mid-sentence.** Let IDEs and GitHub wrap text responsively.
@@ -112,9 +115,9 @@ We follow a **Modern Markdown Git style**: concise, imperative subjects with a b
 #### Good
 
 ```text
-effects: avoid DDC/CI write queueing during rapid focus switches
+effects: drive dimmer fades from the wall clock rather than frame counts
 
-Monitor panels drop intermediate values when bombarded with brightness changes. Settle on a single write per transition so the internal panel ramp executes smoothly.
+A compositor stops delivering frame callbacks for an output that has been switched off, which froze fades partway through and left a screen dark. Deriving progress from elapsed time lets an output that wakes up mid-transition land where it should have been.
 ```
 
 ```text

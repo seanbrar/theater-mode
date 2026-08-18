@@ -14,15 +14,18 @@ gi.require_version("GLib", "2.0")
 gi.require_version("GLibUnix", "2.0")
 from gi.repository import Gio, GLib, GLibUnix  # noqa: E402
 
-from theater_mode.constants import BUS_NAME, INTERFACE_XML, OBJECT_PATH
-from theater_mode.daemon import Daemon
-from theater_mode.effects import (
-    EFFECTS,
-    BrightnessEffect,
-    CompositeEffect,
-    Effect,
+from theater_mode import __version__  # noqa: E402
+from theater_mode.constants import (  # noqa: E402
+    BUS_NAME,
+    DEFAULT_DIM_CURVE,
+    DEFAULT_DIM_DURATION,
+    DEFAULT_DIM_FACTOR,
+    INTERFACE_XML,
+    OBJECT_PATH,
 )
-from theater_mode.service import make_handler
+from theater_mode.daemon import Daemon  # noqa: E402
+from theater_mode.effects import EFFECTS, EffectOptions  # noqa: E402
+from theater_mode.service import make_handler  # noqa: E402
 
 log = logging.getLogger("theater-moded")
 
@@ -33,23 +36,38 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="theater-moded",
         description="Smart multi-monitor theater mode daemon for KDE Plasma on Wayland.",
     )
+    parser.add_argument("--version", action="version", version=f"theater-moded {__version__}")
     parser.add_argument(
         "--effect",
         default="log",
-        help="effects to apply to secondary outputs, comma separated "
-        f"({', '.join(sorted(EFFECTS))}); default is log (dry run)",
+        choices=sorted(EFFECTS),
+        help="effect to apply to secondary outputs; default is log (dry run)",
     )
     parser.add_argument(
         "--dim-factor",
         type=float,
-        default=0.35,
-        help="fraction of original brightness to dim to for brightness effect (0 < x <= 1)",
+        default=DEFAULT_DIM_FACTOR,
+        help="how much of a secondary output's brightness to remove "
+        f"(0 = no dimming, 1 = fully black; default: {DEFAULT_DIM_FACTOR})",
     )
     parser.add_argument(
-        "--settle-seconds",
+        "--dim-duration",
         type=float,
-        default=1.5,
-        help="hardware brightness transition settle delay (used to sequence wallpaper switches)",
+        default=DEFAULT_DIM_DURATION,
+        help=f"duration in seconds for cinematic fade transitions (default: {DEFAULT_DIM_DURATION}s)",
+    )
+    parser.add_argument(
+        "--dim-curve",
+        type=str,
+        default=DEFAULT_DIM_CURVE,
+        choices=["sine", "quad", "cubic", "linear"],
+        help=f"mathematical easing curve for fades (default: {DEFAULT_DIM_CURVE})",
+    )
+    parser.add_argument(
+        "--art",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="show the game's Steam library artwork on dimmed outputs (default: enabled)",
     )
     parser.add_argument(
         "--revert-delay",
@@ -75,29 +93,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     args = parser.parse_args(argv)
 
-    if not 0.0 < args.dim_factor <= 1.0:
-        parser.error("--dim-factor must be greater than 0 and at most 1")
+    if not 0.0 <= args.dim_factor <= 1.0:
+        parser.error("--dim-factor must be between 0 (no dimming) and 1 (fully black)")
+
+    if args.dim_duration <= 0.0:
+        parser.error("--dim-duration must be greater than 0")
 
     return args
-
-
-def build_effect_pipeline(effect_str: str, dim_factor: float, settle_seconds: float) -> Effect:
-    """Instantiate and compose requested effects from comma-separated names."""
-    names = [name.strip() for name in effect_str.split(",") if name.strip()]
-    unknown = [name for name in names if name not in EFFECTS]
-    if unknown or not names:
-        raise ValueError(
-            f"unknown effect(s): {', '.join(unknown) or '(none)'}; "
-            f"choose from {', '.join(sorted(EFFECTS))}"
-        )
-
-    def build_single(name: str) -> Effect:
-        if EFFECTS[name] is BrightnessEffect:
-            return BrightnessEffect(dim_factor, settle_seconds=settle_seconds)
-        return EFFECTS[name]()
-
-    built = [build_single(name) for name in names]
-    return built[0] if len(built) == 1 else CompositeEffect(built)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,15 +112,14 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
 
-    try:
-        effect = build_effect_pipeline(
-            args.effect,
+    effect = EFFECTS[args.effect].create(
+        EffectOptions(
             dim_factor=args.dim_factor,
-            settle_seconds=args.settle_seconds,
+            dim_duration=args.dim_duration,
+            dim_curve=args.dim_curve,
+            art=args.art,
         )
-    except ValueError as exc:
-        log.error("%s", exc)
-        return 2
+    )
 
     daemon = Daemon(
         effect=effect,
@@ -126,7 +127,6 @@ def main(argv: list[str] | None = None) -> int:
         revert_delay=max(0.0, args.revert_delay),
         stage_delay=max(0.0, args.stage_delay),
     )
-    daemon.recover()
 
     loop = GLib.MainLoop()
 

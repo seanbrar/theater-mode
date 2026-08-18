@@ -4,19 +4,21 @@ from __future__ import annotations
 
 import unittest
 
-from theater_mode.cli import build_effect_pipeline, parse_args
-from theater_mode.effects.brightness import BrightnessEffect
-from theater_mode.effects.composite import CompositeEffect
+from theater_mode.cli import parse_args
+from theater_mode.effects import EFFECTS
+from theater_mode.effects.base import EffectOptions
+from theater_mode.effects.dim import DimEffect
 from theater_mode.effects.log import LogEffect
-from theater_mode.effects.wallpaper import WallpaperEffect
 
 
 class TestCLI(unittest.TestCase):
     def test_parse_defaults(self) -> None:
         args = parse_args([])
         self.assertEqual(args.effect, "log")
-        self.assertEqual(args.dim_factor, 0.35)
-        self.assertEqual(args.settle_seconds, 1.5)
+        self.assertEqual(args.dim_factor, 0.85)
+        self.assertEqual(args.dim_duration, 2.0)
+        self.assertEqual(args.dim_curve, "sine")
+        self.assertTrue(args.art)
         self.assertEqual(args.revert_delay, 3.0)
         self.assertEqual(args.stage_delay, 1.5)
         self.assertFalse(args.require_fullscreen)
@@ -26,39 +28,51 @@ class TestCLI(unittest.TestCase):
         args = parse_args(
             [
                 "--effect",
-                "brightness,wallpaper",
+                "dim",
                 "--dim-factor",
-                "0.20",
+                "0.80",
+                "--dim-duration",
+                "3.5",
+                "--dim-curve",
+                "cubic",
+                "--no-art",
                 "--revert-delay",
                 "5.0",
                 "--verbose",
             ]
         )
-        self.assertEqual(args.effect, "brightness,wallpaper")
-        self.assertEqual(args.dim_factor, 0.20)
+        self.assertEqual(args.effect, "dim")
+        self.assertEqual(args.dim_factor, 0.80)
+        self.assertEqual(args.dim_duration, 3.5)
+        self.assertEqual(args.dim_curve, "cubic")
+        self.assertFalse(args.art)
         self.assertEqual(args.revert_delay, 5.0)
         self.assertTrue(args.verbose)
 
-    def test_build_single_effect(self) -> None:
-        effect = build_effect_pipeline("log", dim_factor=0.35, settle_seconds=1.5)
-        self.assertIsInstance(effect, LogEffect)
+    def test_effects_are_built_from_options(self) -> None:
+        options = EffectOptions(dim_factor=0.5, dim_duration=9.0, dim_curve="quad", art=False)
 
-        b_effect = build_effect_pipeline("brightness", dim_factor=0.25, settle_seconds=2.0)
-        self.assertIsInstance(b_effect, BrightnessEffect)
-        self.assertEqual(b_effect._dim_factor, 0.25)
-        self.assertEqual(b_effect.transition_seconds, 2.0)
+        effect = EFFECTS["dim"].create(options)
+        self.assertIsInstance(effect, DimEffect)
+        self.assertEqual(effect._dim_factor, 0.5)
+        self.assertEqual(effect._duration, 9.0)
+        self.assertEqual(effect._curve, "quad")
+        self.assertFalse(effect._art)
 
-        w_effect = build_effect_pipeline("wallpaper", dim_factor=0.35, settle_seconds=1.5)
-        self.assertIsInstance(w_effect, WallpaperEffect)
+        # Effects without settings ignore the options entirely.
+        self.assertIsInstance(EFFECTS["log"].create(options), LogEffect)
 
-    def test_build_composite_effect(self) -> None:
-        effect = build_effect_pipeline("brightness,wallpaper", dim_factor=0.20, settle_seconds=1.5)
-        self.assertIsInstance(effect, CompositeEffect)
-        self.assertEqual(effect.name, "brightness+wallpaper")
+    def test_dim_factor_bounds(self) -> None:
+        # 0.0 means "no dimming" and is a legitimate value; 1.0 is fully black.
+        self.assertEqual(parse_args(["--dim-factor", "0"]).dim_factor, 0.0)
+        self.assertEqual(parse_args(["--dim-factor", "1"]).dim_factor, 1.0)
+        for bad in ("-0.1", "1.1"):
+            with self.assertRaises(SystemExit):
+                parse_args(["--dim-factor", bad])
 
-    def test_build_unknown_effect(self) -> None:
-        with self.assertRaises(ValueError):
-            build_effect_pipeline("unknown_effect", dim_factor=0.35, settle_seconds=1.5)
+    def test_unknown_effect_is_rejected(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--effect", "unknown_effect"])
 
 
 if __name__ == "__main__":
