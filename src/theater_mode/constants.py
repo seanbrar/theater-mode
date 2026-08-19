@@ -142,6 +142,10 @@ INTERFACE_XML = f"""
       <arg type='s' name='keys_json' direction='in'/>
       <arg type='s' name='result' direction='out'/>
     </method>
+    <method name='Unset'>
+      <arg type='s' name='keys_json' direction='in'/>
+      <arg type='s' name='result' direction='out'/>
+    </method>
     <method name='Reload'>
       <arg type='s' name='result' direction='out'/>
     </method>

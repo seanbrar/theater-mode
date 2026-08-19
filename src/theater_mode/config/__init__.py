@@ -23,6 +23,8 @@ from theater_mode.config.schema import (
 from theater_mode.config.writer import (
     commit_user_config,
     format_table_header,
+    remove_toml_keys,
+    unset_user_config,
     update_toml_content,
 )
 
@@ -39,6 +41,7 @@ __all__ = [
     "ResolvedDisplaySettings",
     "TransitionConfig",
     "commit_user_config",
+    "remove_toml_keys",
     "format_table_header",
     "generate_reference_config",
     "get_default_system_path",
@@ -47,6 +50,7 @@ __all__ = [
     "load_resolved_config",
     "lookup_spec",
     "split_key_path",
+    "unset_user_config",
     "update_toml_content",
     "validate_updates",
 ]

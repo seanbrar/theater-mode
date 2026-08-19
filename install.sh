@@ -72,6 +72,12 @@ Options:
 EOF
 }
 
+# Discard a staging directory that may hold read-only copies of a read-only source tree.
+discard() {
+    chmod -R u+w "$1" 2>/dev/null || true
+    rm -rf "$1"
+}
+
 place() {
     local src=$1 dest=$2 parent stage had_old=0
     [ -e "$src" ] || die "missing from repo: $src"
@@ -79,17 +85,20 @@ place() {
     mkdir -p "$parent" || die "could not create $parent"
     stage=$(mktemp -d "$parent/.theater-mode-install.XXXXXX") \
         || die "could not stage $dest"
-    cp -a "$src" "$stage/new" || { rm -rf "$stage"; die "could not stage $dest"; }
+    cp -a "$src" "$stage/new" || { discard "$stage"; die "could not stage $dest"; }
+    # cp -a preserves source modes, so a read-only checkout would otherwise install a
+    # read-only tree that neither the next upgrade nor --uninstall can remove.
+    chmod -R u+w "$stage/new" 2>/dev/null || true
     if [ -e "$dest" ] || [ -L "$dest" ]; then
-        mv "$dest" "$stage/old" || { rm -rf "$stage"; die "could not replace $dest"; }
+        mv "$dest" "$stage/old" || { discard "$stage"; die "could not replace $dest"; }
         had_old=1
     fi
     if ! mv "$stage/new" "$dest"; then
         [ "$had_old" -eq 1 ] && mv "$stage/old" "$dest" || true
-        rm -rf "$stage"
+        discard "$stage"
         die "could not install $dest"
     fi
-    rm -rf "$stage"
+    discard "$stage"
     info "$dest"
 }
 
@@ -472,6 +481,7 @@ do_uninstall() {
     if [ "$SERVICE" -eq 1 ]; then
         systemctl --user disable --now theater-mode.service >/dev/null 2>&1 || true
     fi
+    chmod -R u+w "${targets[@]}" 2>/dev/null || true
     rm -rf "${targets[@]}"
     if [ "$SERVICE" -eq 1 ]; then
         systemctl --user daemon-reload || true

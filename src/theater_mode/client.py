@@ -233,6 +233,12 @@ def main(
     set_p.add_argument("key", help="Key path (e.g. effect.dim_factor)")
     set_p.add_argument("value", help="New value")
 
+    # config unset
+    unset_p = config_sub.add_parser(
+        "unset", help="Remove a setting from the user config file, restoring its default"
+    )
+    unset_p.add_argument("keys", nargs="+", metavar="KEY", help="Key path(s) to remove")
+
     # config preview
     prev_p = config_sub.add_parser("preview", help="Preview setting in-session without saving")
     prev_p.add_argument("key", help="Key path (e.g. effect.dim_factor)")
@@ -337,6 +343,18 @@ def main(
             # The daemon reports refused keys inline rather than failing the D-Bus call.
             if result.startswith("error") or "rejected:" in result:
                 return 1
+
+        case "config", "unset":
+            result = call_dbus("Unset", json.dumps(args.keys))
+            print(result)
+            if result.startswith("error") or "rejected:" in result:
+                return 1
+            # Show the resolved fallback value for each removed key.
+            resolved = json.loads(call_dbus("GetResolved"))
+            for key in args.keys:
+                value = _lookup(resolved, key)
+                if value is not _MISSING and not isinstance(value, dict):
+                    print(f"  {key} is now {value}")
 
         case "config", "revert-preview":
             print(call_dbus("RevertPreview"))

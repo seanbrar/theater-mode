@@ -134,6 +134,91 @@ def update_toml_content(original_content: str, updates: dict[str, Any]) -> str:
     return "\n".join(new_lines).rstrip("\n") + "\n"
 
 
+def remove_toml_keys(original_content: str, key_paths: set[str]) -> tuple[str, set[str]]:
+    """Delete the given key paths from TOML text, preserving everything around them.
+
+    Returns the new text and the subset of key paths that were actually present. A table
+    left with no keys is kept: its header may carry comments the user wrote, and an empty
+    table resolves identically to an absent one.
+    """
+    targets: dict[str, set[str]] = {}
+    for key_path in key_paths:
+        split = split_key_path(key_path)
+        if split is None:
+            raise ValueError(f"Malformed configuration key path: {key_path!r}")
+        table, key = split
+        targets.setdefault(table, set()).add(key)
+
+    new_lines: list[str] = []
+    removed: set[str] = set()
+    current_table = ""
+
+    for line in original_content.splitlines():
+        if table_match := TABLE_HEADER_PATTERN.match(line):
+            current_table = normalize_table_path(table_match.group(1))
+            new_lines.append(line)
+            continue
+
+        if key_match := KEY_ASSIGN_PATTERN.match(line):
+            key_name = key_match.group(1).strip()
+            if key_name in targets.get(current_table, set()):
+                removed.add(f"{current_table}.{key_name}")
+                continue
+
+        new_lines.append(line)
+
+    return "\n".join(new_lines).rstrip("\n") + "\n", removed
+
+
+def _write_atomically(target_path: Path, text: str) -> tuple[bool, str]:
+    """Replace a config file in one step, so a crash cannot leave it half written."""
+    temp_file: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=target_path.parent,
+            prefix=f".{target_path.name}.tmp-",
+            delete=False,
+        ) as tf:
+            temp_file = Path(tf.name)
+            tf.write(text)
+            tf.flush()
+            os.fsync(tf.fileno())
+
+        temp_file.replace(target_path)
+        return True, f"Successfully committed config to {target_path}"
+    except OSError as e:
+        if temp_file is not None:
+            temp_file.unlink(missing_ok=True)
+        return False, f"Failed to write config file: {e}"
+
+
+def unset_user_config(
+    key_paths: set[str],
+    user_config_path: Path | None = None,
+) -> tuple[bool, str, set[str]]:
+    """Remove keys from the user configuration file so they fall back to a lower layer.
+
+    Returns (success, message, removed key paths).
+    """
+    target_path = user_config_path or get_default_user_path()
+    if not target_path.is_file():
+        return True, f"No user configuration file at {target_path}", set()
+
+    try:
+        original_text = target_path.read_text(encoding="utf-8")
+    except OSError as e:
+        return False, f"Failed to read existing config at {target_path}: {e}", set()
+
+    updated_text, removed = remove_toml_keys(original_text, key_paths)
+    if not removed:
+        return True, f"No matching keys in {target_path}", set()
+
+    ok, msg = _write_atomically(target_path, updated_text)
+    return ok, msg, removed if ok else set()
+
+
 def commit_user_config(
     updates: dict[str, Any],
     user_config_path: Path | None = None,
@@ -153,24 +238,4 @@ def commit_user_config(
             return False, f"Failed to read existing config at {target_path}: {e}"
 
     updated_text = update_toml_content(original_text, updates)
-
-    temp_file: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=target_path.parent,
-            prefix=f".{target_path.name}.tmp-",
-            delete=False,
-        ) as tf:
-            temp_file = Path(tf.name)
-            tf.write(updated_text)
-            tf.flush()
-            os.fsync(tf.fileno())
-
-        temp_file.replace(target_path)
-        return True, f"Successfully committed config to {target_path}"
-    except OSError as e:
-        if temp_file is not None:
-            temp_file.unlink(missing_ok=True)
-        return False, f"Failed to write config file: {e}"
+    return _write_atomically(target_path, updated_text)

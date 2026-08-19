@@ -14,6 +14,9 @@ from theater_mode.config import (
     ResolvedConfig,
     commit_user_config,
     load_resolved_config,
+    lookup_spec,
+    split_key_path,
+    unset_user_config,
     validate_updates,
 )
 from theater_mode.display.drm import connected_outputs, output_identities
@@ -460,6 +463,51 @@ class Daemon:
         log.info("committed %d keys to user configuration file", len(accepted))
         self._reload_internal()
         return self._report(f"committed {len(accepted)} keys successfully", rejected)
+
+    def unset(self, keys_json: str) -> str:
+        """Remove keys from the user configuration file so they fall back to a lower layer."""
+        try:
+            requested = json.loads(keys_json)
+        except json.JSONDecodeError as e:
+            return f"error: invalid JSON payload: {e}"
+        if not isinstance(requested, list) or not all(isinstance(k, str) for k in requested):
+            return "error: unset payload must be a JSON array of key paths"
+
+        # Refuse keys the schema does not define, so a typo is reported rather than
+        # silently succeeding as "already unset".
+        known: set[str] = set()
+        rejected: list[Diagnostic] = []
+        for key_path in requested:
+            split = split_key_path(key_path)
+            if split is None or lookup_spec(key_path) is None:
+                rejected.append(
+                    Diagnostic(
+                        key_path=key_path,
+                        message=f"Unknown configuration key '{key_path}'",
+                        severity="warning",
+                    )
+                )
+            else:
+                table, leaf = split
+                known.add(f"{table}.{leaf}")
+
+        if not known:
+            return self._report("error: nothing to unset", rejected)
+
+        user_path = self.dev_config.user_config_override if self.dev_config else None
+        ok, msg, removed = unset_user_config(known, user_config_path=user_path)
+        if not ok:
+            log.error("unset failed: %s", msg)
+            return f"error: {msg}"
+
+        if removed:
+            log.info("unset %d keys from user configuration file", len(removed))
+            self._reload_internal()
+
+        summary = f"unset {len(removed)} keys"
+        if untouched := sorted(known - removed):
+            summary += "; already unset: " + ", ".join(untouched)
+        return self._report(summary, rejected)
 
     @staticmethod
     def _report(summary: str, rejected: list[Diagnostic]) -> str:

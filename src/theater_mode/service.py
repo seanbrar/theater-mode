@@ -34,6 +34,7 @@ def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., 
         "Preview": daemon.preview,
         "RevertPreview": daemon.revert_preview,
         "Commit": daemon.commit,
+        "Unset": daemon.unset,
         "Reload": daemon.reload,
     }
 
