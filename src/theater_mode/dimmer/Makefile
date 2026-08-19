@@ -1,6 +1,25 @@
-CC ?= gcc
-CFLAGS ?= -O2 -Wall -Wextra -pedantic
-LDFLAGS ?= -lwayland-client -lm
+CPPFLAGS ?= -D_FORTIFY_SOURCE=3
+CFLAGS ?= -O2 -Wall -Wextra -pedantic -fstack-protector-strong -fPIE
+LDFLAGS ?= -Wl,-z,relro,-z,now -pie
+
+# Prevent the C23 strtol redirect from raising the glibc symbol floor on newer compilers.
+# Paired with _DEFAULT_SOURCE in dimmer.c: both are required, neither is sufficient alone.
+STD = -std=gnu17
+
+# Ask pkg-config rather than hardcoding paths, so a libwayland installed under a
+# non-standard prefix builds too. install.sh checks for both before compiling.
+WAYLAND_CFLAGS := $(shell pkg-config --cflags wayland-client)
+WAYLAND_LIBS := $(shell pkg-config --libs wayland-client)
+
+# Keep libraries after objects and independent of distro-supplied LDFLAGS.
+LDLIBS ?= $(WAYLAND_LIBS) -lm
+
+HERE := $(dir $(lastword $(MAKEFILE_LIST)))
+VERSION_FILE := $(HERE)../__init__.py
+VERSION := $(shell sed -n 's/^__version__ = "\(.*\)"/\1/p' $(VERSION_FILE))
+ifeq ($(strip $(VERSION)),)
+VERSION := unknown
+endif
 
 # xdg-shell-protocol.c is linked but never included: the layer-shell bindings name
 # xdg_popup_interface in their type table for zwlr_layer_surface_v1::get_popup, so the
@@ -13,12 +32,18 @@ SRCS = dimmer.c \
        alpha-modifier-v1-protocol.c \
        xdg-shell-protocol.c
 
+# Rebuild when a vendored protocol header changes.
+HDRS = wlr-layer-shell-unstable-v1-client-protocol.h \
+       viewporter-client-protocol.h \
+       single-pixel-buffer-v1-client-protocol.h \
+       alpha-modifier-v1-client-protocol.h
+
 TARGET = theater-dimmer
 
 all: $(TARGET)
 
-$(TARGET): $(SRCS)
-	$(CC) $(CFLAGS) -I. $(SRCS) $(LDFLAGS) -o $(TARGET)
+$(TARGET): $(SRCS) $(HDRS) $(VERSION_FILE)
+	$(CC) $(STD) $(CPPFLAGS) $(CFLAGS) $(WAYLAND_CFLAGS) -DTHEATER_DIMMER_VERSION='"$(VERSION)"' -I. $(SRCS) $(LDFLAGS) $(LDLIBS) -o $(TARGET)
 
 clean:
 	rm -f $(TARGET)

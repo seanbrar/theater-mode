@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+#
+# Assemble a release tarball around an already-compiled theater-dimmer.
+#
+#   bin/make-release --dimmer-bin path/to/theater-dimmer [--outdir dist]
+#
+# The dimmer sources are kept in the archive so a user whose glibc is too old for the
+# prebuilt helper can still run ./install.sh --build without cloning anything.
+
+set -euo pipefail
+
+REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+DIMMER=""
+OUTDIR="$REPO/dist"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --dimmer-bin=*) DIMMER="${1#*=}" ;;
+        --dimmer-bin)   [ $# -ge 2 ] || die "--dimmer-bin requires a path"; DIMMER="$2"; shift ;;
+        --outdir=*)     OUTDIR="${1#*=}" ;;
+        --outdir)       [ $# -ge 2 ] || die "--outdir requires a path"; OUTDIR="$2"; shift ;;
+        -h|--help)      sed -n '3,8p' "$0"; exit 0 ;;
+        *)              die "unknown option: $1" ;;
+    esac
+    shift
+done
+
+[ -n "$DIMMER" ] || die "--dimmer-bin is required"
+[ -x "$DIMMER" ] || die "not an executable file: $DIMMER"
+
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/theater_mode/__init__.py)"
+[ -n "$VERSION" ] || die "could not read __version__ from src/theater_mode/__init__.py"
+
+STAMP="$("$DIMMER" --version 2>/dev/null | awk '{print $2}')" \
+    || die "$DIMMER --version failed; it is not a usable theater-dimmer"
+[ "$STAMP" = "$VERSION" ] \
+    || die "helper reports $STAMP but this tree is $VERSION; rebuild the helper"
+
+ARCH="$(uname -m)"
+NAME="theater-mode-v${VERSION}-linux-${ARCH}"
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+ROOT="$STAGE/$NAME"
+
+mkdir -p "$ROOT"
+
+# Read current contents for files known to Git. New files must be staged first, which
+# prevents unrelated local scratch files from leaking into an archive.
+if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+    printf '\033[33mwarning:\033[0m working tree has uncommitted edits; archive will include them\n' >&2
+fi
+git ls-files --cached -z \
+    | tar --null -T - -cf - \
+    | tar -x -C "$ROOT"
+
+# Development-only files. pyproject.toml matters beyond tidiness: bin/theater-mode{,d}
+# identify a source checkout by its presence, and a release is not a checkout.
+rm -rf "$ROOT/tests" "$ROOT/.github" "$ROOT/bin/check" "$ROOT/bin/check-abi-floor" \
+       "$ROOT/bin/make-release" "$ROOT/get.sh" "$ROOT/pyproject.toml" \
+       "$ROOT/CONTRIBUTING.md" "$ROOT/.gitignore" "$ROOT/distrobox.ini"
+
+# A release ships the runtime tree and nothing else. Anything new and dev-only at the top
+# level must be pruned above, so fail loudly rather than shipping it by omission. Uses find
+# rather than a glob so a stray dotfile cannot slip through unseen.
+EXPECTED_TOP="LICENSE README.md bin config.reference.toml install.sh kwin src systemd"
+ACTUAL_TOP="$(find "$ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+[ "$ACTUAL_TOP" = "$EXPECTED_TOP" ] \
+    || die "unexpected release layout.
+  got:      $ACTUAL_TOP
+  expected: $EXPECTED_TOP
+  Prune new development-only files in bin/make-release, or add them to the expected list."
+
+install -m 0755 "$DIMMER" "$ROOT/bin/theater-dimmer"
+
+mkdir -p "$OUTDIR"
+TARBALL="$OUTDIR/${NAME}.tar.gz"
+
+tar --sort=name --owner=0 --group=0 --numeric-owner \
+    --mtime="@$(git log -1 --format=%ct HEAD)" \
+    -czf "$TARBALL" -C "$STAGE" "$NAME"
+
+( cd "$OUTDIR" && sha256sum "$(basename "$TARBALL")" > "${NAME}.tar.gz.sha256" )
+
+printf 'built %s\n' "$TARBALL"
+printf '  version %s, helper %s, arch %s\n' "$VERSION" "$STAMP" "$ARCH"
+printf '  %s\n' "$(cat "$OUTDIR/${NAME}.tar.gz.sha256")"

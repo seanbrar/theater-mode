@@ -1,0 +1,148 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate release source
+    # Pinned, not ubuntu-latest: this job gates publishing, so a GitHub runner-image
+    # rollover must not be able to block a tag push.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwayland-dev pkg-config python3-gi python3-pil shellcheck
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+      - name: Install Ruff
+        run: |
+          uv tool install "ruff>=0.16,<0.17"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+      - run: ./bin/check
+
+  build:
+    name: build release tarball
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # This pins the binary's glibc baseline instead of inheriting ubuntu-latest's.
+    container: ubuntu:22.04
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            gcc make pkg-config libwayland-dev binutils git ca-certificates tar gzip
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Record binary baseline
+        run: |
+          ldd --version | head -1
+          pkg-config --modversion wayland-client
+
+      - name: Verify tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          source_version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/theater_mode/__init__.py)
+          tag_version="${GITHUB_REF_NAME#v}"
+          [ "$source_version" = "$tag_version" ] || {
+            echo "::error::tag $GITHUB_REF_NAME does not match __version__ $source_version"
+            exit 1
+          }
+
+      - name: Build and inspect theater-dimmer
+        run: |
+          make -C src/theater_mode/dimmer
+          ./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer 2.35
+
+      - name: Assemble tarball
+        run: ./bin/make-release --dimmer-bin src/theater_mode/dimmer/theater-dimmer --outdir dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-tarball
+          path: dist/*
+          if-no-files-found: error
+
+  verify:
+    name: install with runtime dependencies only
+    needs: build
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 10
+    steps:
+      - name: Install runtime dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3 python3-gi libwayland-client0 ca-certificates tar gzip
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-tarball
+          path: dist
+
+      - name: Verify archive and install lifecycle
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -c ./*.sha256)
+          mkdir -p rel fakehome
+          tar xzf dist/*.tar.gz -C rel
+          root=$(find rel -maxdepth 1 -mindepth 1 -type d)
+
+          for tool in cc gcc make pkg-config; do
+            ! command -v "$tool"
+          done
+
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+            HOME="$PWD/fakehome" "$root/install.sh" --no-service
+          for file in .local/bin/theater-mode .local/bin/theater-moded \
+                      .local/bin/theater-dimmer \
+                      .local/share/theater-mode/lib/theater_mode/update.py \
+                      .local/share/kwin/scripts/theater-detect/metadata.json \
+                      .config/systemd/user/theater-mode.service; do
+            [ -e "$PWD/fakehome/$file" ]
+          done
+          "$PWD/fakehome/.local/bin/theater-dimmer" --version
+          [ -x "$PWD/fakehome/.local/share/theater-mode/install.sh" ]
+
+          rm -rf rel dist
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+            HOME="$PWD/fakehome" "$PWD/fakehome/.local/share/theater-mode/install.sh" \
+              --uninstall --no-service --yes
+          [ "$(find fakehome \( -type f -o -type l \) | wc -l)" -eq 0 ]
+
+  publish:
+    name: publish release
+    needs: [build, verify]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-tarball
+          path: dist
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: dist/*
+          generate_release_notes: true

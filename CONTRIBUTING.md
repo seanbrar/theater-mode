@@ -11,25 +11,50 @@ This guide outlines our development workflow, coding standards, and commit messa
 ### Prerequisites
 
 * **Python 3.12+** with `PyGObject` bindings (`python3-gobject` or `pygobject`)
-* **Pillow** (`python3-pillow`) — optional, needed for game artwork
+* **Pillow** (`python3-pillow`) — optional at runtime, required for the artwork tests
 * **A C compiler, `make`, and libwayland** (`wayland-devel` / `libwayland-dev`) to build the dimmer
 * **KDE Plasma 6 on Wayland**
-* **Ruff** (recommended for local linting and formatting)
+* **Ruff** and **ShellCheck**
+
+On an atomic distribution, the repository's Distrobox manifest provides these dependencies without layering packages onto the host:
+
+```bash
+distrobox assemble create --file distrobox.ini
+distrobox enter theater-mode-dev -- ./bin/check
+```
+
+The first command creates the environment once; subsequent checks only need the second. The container has its own name and is not exported into the host's `PATH`.
+
+**After editing `distrobox.ini`, recreate the container** — an existing one is never modified in place, and `--replace` does not override the manifest's `replace=false`:
+
+```bash
+distrobox assemble rm --file distrobox.ini
+distrobox assemble create --file distrobox.ini
+```
+
+Distrobox shares your `$HOME` and places `~/.local/bin` ahead of the container's own directories on `PATH`, so a tool you have installed on the host takes precedence over the copy the manifest provides. This is why `bin/check` opens by printing the path and version of every tool it resolved: when a result differs from CI, that block usually explains it.
+
+The manifest could set `home=` to sidestep this, and deliberately does not. A separate `HOME` would send `./install.sh` to a home the host's systemd never reads, which costs the one workflow the container exists for on an atomic host: build the helper here, then install it into your real session.
+
+For the same reason, `$HOME` inside the container **is** your real home. Never run `./install.sh` there without redirecting it, or it will write to your actual `~/.local` and touch the host's user service:
+
+```bash
+env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+    HOME=/tmp/fake-home ./install.sh --no-service
+```
 
 ### Local Setup & Live Testing
 
-To test your changes live against your active desktop session without repeatedly copying files:
+To test your changes against your active desktop session, reinstall and follow the logs. The
+install restarts the daemon for you, and `make` is a no-op when the C sources have not changed:
 
 ```bash
-# Symlink repo files into ~/.local/bin and ~/.local/share
-./install.sh --link
-
-# Restart the user daemon to pick up changes
-systemctl --user restart theater-mode.service
-
-# Follow live daemon logs
+./install.sh
 journalctl --user -u theater-mode.service -f
 ```
+
+For anything D-Bus-shaped, prefer a daemon on a private bus over reinstalling: the entrypoints
+in `bin/` add `src/` to the path themselves when run from a checkout, so no install is needed.
 
 ### Running Tests & Sanity Checks
 
@@ -39,10 +64,7 @@ Before committing, run the fast repository check script:
 ./bin/check
 ```
 
-This runs:
-1. A build of `theater-dimmer` with `-Werror`.
-2. The full unit test suite via `unittest`.
-3. Ruff linter (`ruff check .`) and code formatter check (`ruff format --check .`).
+This builds `theater-dimmer` with `-Werror`, checks its version and the generated configuration reference, runs ShellCheck and the unit tests, then checks Python linting and formatting with Ruff.
 
 You can also install `bin/check` as a git pre-commit hook:
 
@@ -68,7 +90,7 @@ Dev keys are settable **only via environment variables** and are reserved for de
 * **Modern Python**: Target Python 3.12+. Every Python file should begin with `from __future__ import annotations`.
 * **Type Annotations**: Provide explicit type hints for all function signatures and class attributes.
 * **Docstrings**: Follow PEP 257 format (`"""Single-line summary."""` or summary followed by blank line and detailed notes).
-* **Formatting & Linting**: We use [Ruff](pyproject.toml) configured for 100-character line lengths and sorted imports (`isort`). Run `ruff format .` and `ruff check --fix .` to format code automatically. `bin/check` uses a system `ruff` when present and otherwise falls back to `uvx ruff`, so either installation works; `uv` is development tooling only and is never required by `install.sh` or at runtime.
+* **Formatting & Linting**: We use [Ruff](pyproject.toml) and ShellCheck. `bin/check` expects the development environment to provide both tools and never downloads dependencies itself.
 * **Modularity**: Keep hardware I/O (DRM sysfs, the dimmer helper, D-Bus) isolated from state tracking and heuristics so logic remains unit-testable without a physical compositor.
 
 ---

@@ -2,8 +2,7 @@
 #
 # Install theater-mode into the user's home ($HOME) without elevation.
 #
-#   ./install.sh            copy the files into place
-#   ./install.sh --link     symlink them instead, so edits in this repo are live
+#   ./install.sh              copy the files into place
 #   ./install.sh --uninstall  remove what this script installed
 #
 # Re-running is safe: it overwrites its own files and leaves your settings
@@ -12,6 +11,7 @@
 set -euo pipefail
 
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_REPO="seanbrar/theater-mode"
 
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -22,13 +22,21 @@ DAEMON="$BIN_DIR/theater-moded"
 CLIENT="$BIN_DIR/theater-mode"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
+KWIN_PLUGIN_ID="theater-detect"
 DOC="$DATA_DIR/theater-mode/README.md"
 REF_CONFIG="$DATA_DIR/theater-mode/config.reference.toml"
 APP_DATA="$DATA_DIR/theater-mode"
+SELF_COPY="$DATA_DIR/theater-mode/install.sh"
 
-MODE="copy"
 FORCE=0
-SERVICE=1  # 1 = enable/start systemd service; 0 (--no-service) = stage files only
+SERVICE=1  # 0 stages files, 1 activates a new install, 2 preserves activation state
+
+PREBUILT_DIMMER="$REPO/bin/theater-dimmer"
+BUILT_DIMMER="$REPO/src/theater_mode/dimmer/theater-dimmer"
+DIMMER_OVERRIDE=""
+FORCE_BUILD=0
+DIMMER_SOURCE=""
+NEEDS_BUILD=0
 
 # --------------------------------------------------------------------------
 
@@ -44,25 +52,36 @@ Usage:
   ./install.sh [OPTIONS]
 
 Options:
-  -l, --link       Symlink files into place instead of copying (for development)
   -u, --uninstall  Remove installed binaries, KWin script, and systemd unit
-  -n, --no-service Stage files only; do not reload, enable, or start the user service
+  -n, --no-service Stage files only; do not activate the service or the KWin script
+      --preserve-service
+                   Replace files and restart the service only if it is already running
+      --dimmer-bin=PATH
+                   Install this prebuilt theater-dimmer instead of compiling one
+  -b, --build      Compile theater-dimmer from source, ignoring any prebuilt helper
   -y, --yes        Answer yes to uninstall confirmation prompts non-interactively
   -h, --help       Show this help message
 EOF
 }
 
-# Every install goes through here so copy and symlink modes cannot drift apart.
 place() {
-    local src=$1 dest=$2
+    local src=$1 dest=$2 parent stage had_old=0
     [ -e "$src" ] || die "missing from repo: $src"
-    mkdir -p "$(dirname "$dest")" || die "could not create $(dirname "$dest")"
-    rm -rf "$dest"
-    if [ "$MODE" = "link" ]; then
-        ln -s "$src" "$dest" || die "could not link $dest"
-    else
-        cp -r "$src" "$dest" || die "could not copy to $dest"
+    parent=$(dirname "$dest")
+    mkdir -p "$parent" || die "could not create $parent"
+    stage=$(mktemp -d "$parent/.theater-mode-install.XXXXXX") \
+        || die "could not stage $dest"
+    cp -a "$src" "$stage/new" || { rm -rf "$stage"; die "could not stage $dest"; }
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+        mv "$dest" "$stage/old" || { rm -rf "$stage"; die "could not replace $dest"; }
+        had_old=1
     fi
+    if ! mv "$stage/new" "$dest"; then
+        [ "$had_old" -eq 1 ] && mv "$stage/old" "$dest" || true
+        rm -rf "$stage"
+        die "could not install $dest"
+    fi
+    rm -rf "$stage"
     info "$dest"
 }
 
@@ -101,13 +120,88 @@ render_unit() {
     info "$UNIT"
 }
 
-# Remove dimmer source/binary and bytecode cache from copy-installed lib directory.
+# Remove dimmer source/binary and bytecode cache from the installed lib directory.
 prune_package_copy() {
-    if [ "$MODE" = "link" ]; then
-        return 0
-    fi
     rm -rf "$APP_DATA/lib/theater_mode/dimmer"
     find "$APP_DATA/lib/theater_mode" -type d -name __pycache__ -prune -exec rm -rf {} +
+}
+
+# Persist the same KWin setting used by System Settings.
+activate_kwin_script() {
+    command -v kwriteconfig6 >/dev/null 2>&1 || return 1
+    kwriteconfig6 --file kwinrc --group Plugins \
+        --key "${KWIN_PLUGIN_ID}Enabled" true >/dev/null 2>&1 || return 1
+    notify_kwin_reconfigure
+    return 0
+}
+
+deactivate_kwin_script() {
+    command -v kwriteconfig6 >/dev/null 2>&1 || return 1
+    kwriteconfig6 --file kwinrc --group Plugins \
+        --key "${KWIN_PLUGIN_ID}Enabled" --delete >/dev/null 2>&1 || return 1
+    return 0
+}
+
+notify_kwin_reconfigure() {
+    if command -v busctl >/dev/null 2>&1; then
+        busctl --user call org.kde.KWin /KWin org.kde.KWin reconfigure >/dev/null 2>&1 || true
+    elif command -v qdbus6 >/dev/null 2>&1; then
+        qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+    elif command -v qdbus >/dev/null 2>&1; then
+        qdbus org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+    fi
+}
+
+resolve_dimmer() {
+    if [ "$FORCE_BUILD" -eq 1 ]; then
+        DIMMER_SOURCE="$BUILT_DIMMER"
+        NEEDS_BUILD=1
+    elif [ -n "$DIMMER_OVERRIDE" ]; then
+        [ -e "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: no such file: $DIMMER_OVERRIDE"
+        [ -x "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: not executable: $DIMMER_OVERRIDE"
+        DIMMER_SOURCE="$DIMMER_OVERRIDE"
+        NEEDS_BUILD=0
+    elif [ -f "$PREBUILT_DIMMER" ]; then
+        DIMMER_SOURCE="$PREBUILT_DIMMER"
+        NEEDS_BUILD=0
+    else
+        DIMMER_SOURCE="$BUILT_DIMMER"
+        NEEDS_BUILD=1
+    fi
+}
+
+verify_dimmer() {
+    local candidate=$DIMMER_SOURCE staged="" out status
+    # tar applies the caller's umask, so an archive can arrive without its execute bit.
+    # Verify a writable copy: the release tree it came from may be read-only.
+    if [ ! -x "$candidate" ]; then
+        staged=$(mktemp) || die "could not stage $DIMMER_SOURCE for verification"
+        if ! cp "$DIMMER_SOURCE" "$staged"; then
+            rm -f "$staged"
+            die "could not stage $DIMMER_SOURCE for verification"
+        fi
+        chmod +x "$staged"
+        candidate=$staged
+    fi
+    out=$("$candidate" --version 2>&1) && status=0 || status=$?
+    if [ -n "$staged" ]; then
+        rm -f "$staged"
+    fi
+    if [ "$status" -ne 0 ]; then
+        printf '\033[31merror:\033[0m the theater-dimmer helper cannot run on this system:\n' >&2
+        printf '  %s\n' "$out" >&2
+        case "$out" in
+            *GLIBC_*)
+                printf '  This build targets a newer glibc than this system provides.\n' >&2
+                printf '  Compile one for this machine instead: ./install.sh --build\n' >&2
+                ;;
+            *libwayland-client*)
+                printf '  libwayland-client.so.0 is missing. Install your distribution wayland runtime.\n' >&2
+                ;;
+        esac
+        die "refusing to install a helper that cannot execute"
+    fi
+    info "$out ($DIMMER_SOURCE)"
 }
 
 check_prerequisites() {
@@ -117,10 +211,12 @@ check_prerequisites() {
         python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null \
             || missing+=("python3 >= 3.12 (found $(python3 -V 2>&1))")
     fi
-    command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
-    command -v make >/dev/null || missing+=("make")
-    command -v pkg-config >/dev/null || missing+=("pkg-config")
-    if [ "$SERVICE" -eq 1 ]; then
+    if [ "$NEEDS_BUILD" -eq 1 ]; then
+        command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
+        command -v make >/dev/null || missing+=("make")
+        command -v pkg-config >/dev/null || missing+=("pkg-config")
+    fi
+    if [ "$SERVICE" -ne 0 ]; then
         command -v systemctl >/dev/null || missing+=("systemctl")
     fi
 
@@ -129,8 +225,9 @@ check_prerequisites() {
             || missing+=("python3 gobject bindings (python3-gobject / python-gobject)")
     fi
 
-    # Check libwayland client development headers required to compile theater-dimmer
-    if command -v pkg-config >/dev/null; then
+    # Wayland development files are a build-time need only. Installing a prebuilt helper
+    # requires just the runtime library, which every Wayland session already has.
+    if [ "$NEEDS_BUILD" -eq 1 ] && command -v pkg-config >/dev/null; then
         pkg-config --exists wayland-client \
             || missing+=("libwayland client development files (wayland-devel / libwayland-dev / wayland)")
     fi
@@ -154,13 +251,28 @@ check_prerequisites() {
 }
 
 do_install() {
+    if [ ! -d "$REPO/src/theater_mode" ]; then
+        printf '\033[31merror:\033[0m no theater-mode source found next to this script.\n' >&2
+        printf '  install.sh installs the files beside it, so it cannot be run on its own.\n\n' >&2
+        printf '  To install, use the bootstrap instead:\n' >&2
+        printf '    curl -fsSL https://raw.githubusercontent.com/%s/main/get.sh | bash\n\n' \
+            "${PROJECT_REPO}" >&2
+        printf '  To uninstall an existing install:\n' >&2
+        printf '    theater-mode uninstall\n' >&2
+        exit 1
+    fi
+
+    resolve_dimmer
     check_prerequisites
 
-    echo "Building theater-dimmer:"
-    make -C "$REPO/src/theater_mode/dimmer"
+    if [ "$NEEDS_BUILD" -eq 1 ]; then
+        echo "Building theater-dimmer:"
+        make -C "$REPO/src/theater_mode/dimmer"
+    fi
+    verify_dimmer
 
-    echo "Installing theater-mode ($MODE mode):"
-    place "$REPO/src/theater_mode/dimmer/theater-dimmer" "$DIMMER_BIN"
+    echo "Installing theater-mode:"
+    place "$DIMMER_SOURCE" "$DIMMER_BIN"
     chmod +x "$DIMMER_BIN"
     place "$REPO/bin/theater-moded" "$DAEMON"
     chmod +x "$DAEMON"
@@ -172,25 +284,53 @@ do_install() {
     render_unit
     place "$REPO/README.md" "$DOC"
 
-    # The reference config is generated from the schema, never hand-maintained.
+    place "$REPO/install.sh" "$SELF_COPY"
+    chmod +x "$SELF_COPY"
+
+    local ref_tmp
     mkdir -p "$(dirname "$REF_CONFIG")"
+    ref_tmp=$(mktemp "$REF_CONFIG.tmp.XXXXXX") || die "could not stage $REF_CONFIG"
     PYTHONPATH="$REPO/src" python3 -c \
         'import sys
 from theater_mode.config import generate_reference_config
-sys.stdout.write(generate_reference_config())' > "$REF_CONFIG" \
-        || die "failed to generate $REF_CONFIG"
+sys.stdout.write(generate_reference_config())' > "$ref_tmp" \
+        || { rm -f "$ref_tmp"; die "failed to generate $REF_CONFIG"; }
+    mv -f "$ref_tmp" "$REF_CONFIG" || { rm -f "$ref_tmp"; die "could not write $REF_CONFIG"; }
 
     if [ "$SERVICE" -eq 0 ]; then
         cat <<EOF
 
 theater-mode staged successfully (--no-service: nothing was activated).
 
-The unit is installed but not enabled or started. To activate it:
+Files are in place, but neither the service nor the KWin script was turned on:
   systemctl --user daemon-reload
   systemctl --user enable --now theater-mode.service
+  kwriteconfig6 --file kwinrc --group Plugins --key ${KWIN_PLUGIN_ID}Enabled true
 
 Reference:     $REF_CONFIG
 EOF
+        return 0
+    fi
+
+    if [ "$SERVICE" -eq 2 ]; then
+        # Every file is already in place by now, so the update has succeeded whatever
+        # systemd says. Without a running user session (ssh, no lingering) daemon-reload
+        # fails; warn and leave the new files, rather than reporting a failed update.
+        local was_active=0
+        systemctl --user is-active --quiet theater-mode.service && was_active=1
+        if ! systemctl --user daemon-reload 2>/dev/null; then
+            warn "could not reach the systemd user session; files were updated but the"
+            warn "service was not reloaded. Run: systemctl --user daemon-reload"
+            warn "                              systemctl --user restart theater-mode.service"
+            return 0
+        fi
+        if [ "$was_active" -eq 1 ]; then
+            systemctl --user restart theater-mode.service \
+                || warn "files updated, but theater-mode.service did not restart"
+        fi
+        notify_kwin_reconfigure
+        echo
+        echo "theater-mode files updated; existing activation state was preserved."
         return 0
     fi
 
@@ -199,23 +339,41 @@ EOF
         || die "could not enable theater-mode.service"
     systemctl --user restart theater-mode.service || die "could not start theater-mode.service"
 
-    cat <<EOF
+    if activate_kwin_script; then
+        cat <<EOF
 
-theater-mode installed successfully.
+theater-mode is installed and running. Nothing else to do.
 
-Next steps:
-  1. Enable the KWin script:
-     System Settings -> Window Management -> KWin Scripts -> "Theater Mode Detector"
+Cinematic dimming is active with built-in defaults. Launch a game and the screens it
+is not on will dim.
 
-  2. theater-mode works immediately with built-in defaults (cinematic dimming active).
+Try:
+  theater-mode status              Show what the daemon currently sees
+  theater-mode config show         Inspect settings and where each one came from
+  theater-mode config set effect.dim_factor 0.75
 
-  3. Inspect or modify configuration live via the CLI:
-     theater-mode config show
-     theater-mode config set effect.dim_factor 0.75
+  theater-mode update              Upgrade to the latest release
+  theater-mode uninstall           Remove it again
 
-Logs:          journalctl --user -u theater-mode.service -f
-Reference:     $REF_CONFIG
+Logs:      journalctl --user -u theater-mode.service -f
+Reference: $REF_CONFIG
 EOF
+    else
+        cat <<EOF
+
+theater-mode is installed and running, with one step left.
+
+The KDE configuration tools were not found, so the KWin script could not be enabled
+automatically. Turn it on once, by hand:
+
+  System Settings -> Window Management -> KWin Scripts -> "Theater Mode Detector"
+
+Until then the daemon runs but never sees a game start.
+
+Logs:      journalctl --user -u theater-mode.service -f
+Reference: $REF_CONFIG
+EOF
+    fi
 }
 
 do_uninstall() {
@@ -234,7 +392,8 @@ do_uninstall() {
     fi
 
     echo
-    echo "Settings drop-ins and cache directories will not be removed:"
+    echo "Your settings and caches will not be removed:"
+    info "$CONF_DIR/theater-mode/config.toml"
     info "$CONF_DIR/systemd/user/theater-mode.service.d/"
     info "${XDG_CACHE_HOME:-$HOME/.cache}/theater-mode/"
     echo
@@ -252,25 +411,39 @@ do_uninstall() {
         systemctl --user daemon-reload || true
     fi
 
-    # Attempt to notify KWin if running
-    if command -v busctl >/dev/null 2>&1; then
-        busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting unloadScript s "theater-detect" >/dev/null 2>&1 || true
-    elif command -v qdbus6 >/dev/null 2>&1; then
-        qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript theater-detect >/dev/null 2>&1 || true
-    elif command -v qdbus >/dev/null 2>&1; then
-        qdbus org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript theater-detect >/dev/null 2>&1 || true
+    if [ "$SERVICE" -eq 1 ]; then
+        if command -v busctl >/dev/null 2>&1; then
+            busctl --user call org.kde.KWin /Scripting org.kde.kwin.Scripting \
+                unloadScript s "$KWIN_PLUGIN_ID" >/dev/null 2>&1 || true
+        elif command -v qdbus6 >/dev/null 2>&1; then
+            qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript \
+                "$KWIN_PLUGIN_ID" >/dev/null 2>&1 || true
+        elif command -v qdbus >/dev/null 2>&1; then
+            qdbus org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript \
+                "$KWIN_PLUGIN_ID" >/dev/null 2>&1 || true
+        fi
+        deactivate_kwin_script || true
     fi
 
     echo
-    echo "Uninstalled. Remember to disable \"Theater Mode Detector\" in System Settings -> KWin Scripts."
+    if [ "$SERVICE" -eq 1 ] && command -v kwriteconfig6 >/dev/null 2>&1; then
+        echo "Uninstalled."
+    else
+        echo "Uninstalled. Disable \"Theater Mode Detector\" in System Settings -> KWin Scripts."
+    fi
 }
 
 ACTION="install"
 while [ $# -gt 0 ]; do
     case "$1" in
-        -l|--link)       MODE="link" ;;
         -u|--uninstall)  ACTION="uninstall" ;;
         -n|--no-service) SERVICE=0 ;;
+        --preserve-service) SERVICE=2 ;;
+        -b|--build)      FORCE_BUILD=1 ;;
+        --dimmer-bin=*)  DIMMER_OVERRIDE="${1#*=}" ;;
+        --dimmer-bin)
+            [ $# -ge 2 ] || die "--dimmer-bin requires a path"
+            DIMMER_OVERRIDE="$2"; shift ;;
         -y|--yes|-f|--force) FORCE=1 ;;
         -h|--help)       show_help; exit 0 ;;
         *)               die "unknown option: $1 (try --help)" ;;

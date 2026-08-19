@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from collections.abc import Callable
 from typing import Any
 
+from theater_mode import __version__
 from theater_mode.config import split_key_path
-from theater_mode.constants import BUS_NAME, INTERFACE, OBJECT_PATH
+from theater_mode.constants import APP_DATA, BUS_NAME, INTERFACE, OBJECT_PATH
 
 
 def _call_dbus_method(method_name: str, *args: Any) -> str:
@@ -179,6 +181,23 @@ def _parse_cli_value(val_str: str) -> Any:
         return val_str
 
 
+def _run_uninstaller(assume_yes: bool = False) -> int:
+    """Hand off to the installer copy kept alongside the installed package."""
+    installer = APP_DATA / "install.sh"
+    if not installer.is_file():
+        print(
+            f"error: no uninstaller found at {installer}\n"
+            "  This install predates 'theater-mode uninstall'. Run './install.sh --uninstall'\n"
+            "  from the source tree you installed from.",
+            file=sys.stderr,
+        )
+        return 1
+    argv = [str(installer), "--uninstall"]
+    if assume_yes:
+        argv.append("--yes")
+    return subprocess.run(argv, check=False).returncode  # noqa: S603
+
+
 def main(
     argv: list[str] | None = None,
     call_dbus: Callable[..., str] = _call_dbus_method,
@@ -187,6 +206,7 @@ def main(
         prog="theater-mode",
         description="Command-line client for theater-mode daemon and configuration management.",
     )
+    parser.add_argument("--version", action="version", version=f"theater-mode {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # status
@@ -240,7 +260,33 @@ def main(
     # clear
     subparsers.add_parser("clear", help="Clear all active simulations and restore displays")
 
+    # uninstall
+    uninstall_p = subparsers.add_parser("uninstall", help="Remove theater-mode from this machine")
+    uninstall_p.add_argument(
+        "-y", "--yes", action="store_true", help="Do not prompt for confirmation"
+    )
+
+    # update
+    update_p = subparsers.add_parser("update", help="Update theater-mode to the latest release")
+    update_p.add_argument(
+        "--check",
+        action="store_true",
+        help="Report whether a newer release exists without installing it",
+    )
+
     args = parser.parse_args(argv)
+
+    if args.command == "update":
+        from theater_mode import update as update_mod
+
+        try:
+            return update_mod.check() if args.check else update_mod.apply()
+        except update_mod.UpdateError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    if args.command == "uninstall":
+        return _run_uninstaller(assume_yes=args.yes)
 
     match args.command, getattr(args, "config_cmd", None):
         case "status", _:

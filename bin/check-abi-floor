@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#
+# Assert that a compiled theater-dimmer will load on every system we claim to support.
+#
+#   bin/check-abi-floor path/to/theater-dimmer [max_glibc]
+#
+
+set -euo pipefail
+
+die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+BIN="${1:-}"
+MAX_GLIBC="${2:-2.35}"
+[ -n "$BIN" ] || die "usage: $0 path/to/theater-dimmer [max_glibc]"
+[ -f "$BIN" ] || die "no such file: $BIN"
+
+command -v readelf >/dev/null || die "readelf not found (install binutils)"
+
+ALLOWED_LIBS="libc.so.6 libm.so.6 libwayland-client.so.0"
+
+# --- glibc symbol versions -------------------------------------------------
+mapfile -t versions < <(readelf -V "$BIN" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV)
+[ "${#versions[@]}" -gt 0 ] || die "$BIN references no glibc symbols at all; is it a dynamic ELF?"
+
+highest="${versions[-1]}"
+if [ "$(printf '%s\n%s\n' "$MAX_GLIBC" "$highest" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then
+    highest_pattern=${highest//./\\.}
+    printf '\033[31merror:\033[0m %s requires glibc %s, above the %s baseline.\n' \
+        "$BIN" "$highest" "$MAX_GLIBC" >&2
+    printf '  symbols forcing it:\n' >&2
+    readelf --dyn-syms -W "$BIN" \
+        | grep -oE '[A-Za-z_][A-Za-z0-9_]*@GLIBC_'"$highest_pattern" \
+        | sort -u | sed 's/^/    /' >&2
+    die "build against an older baseline, or avoid these symbols"
+fi
+
+# --- shared library dependencies -------------------------------------------
+unexpected=()
+while read -r lib; do
+    [ -n "$lib" ] || continue
+    case " $ALLOWED_LIBS " in
+        *" $lib "*) ;;
+        *) unexpected+=("$lib") ;;
+    esac
+done < <(readelf -d "$BIN" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p')
+
+if [ "${#unexpected[@]}" -gt 0 ]; then
+    printf '\033[31merror:\033[0m %s links libraries outside the portable set:\n' "$BIN" >&2
+    printf '    %s\n' "${unexpected[@]}" >&2
+    die "allowed: $ALLOWED_LIBS"
+fi
+
+# --- ELF hardening ---------------------------------------------------------
+[ "$(readelf -h "$BIN" | sed -n 's/.*Type:[[:space:]]*\([^[:space:]]*\).*/\1/p')" = DYN ] \
+    || die "$BIN is not position-independent (PIE)"
+readelf -lW "$BIN" | grep -q 'GNU_RELRO' || die "$BIN has no GNU_RELRO segment"
+readelf -dW "$BIN" | grep -q 'BIND_NOW' || die "$BIN does not use immediate binding"
+stack_flags=$(readelf -lW "$BIN" | awk '/GNU_STACK/ { print $(NF - 1) }')
+[ -n "$stack_flags" ] || die "$BIN has no GNU_STACK declaration"
+case "$stack_flags" in
+    *E*) die "$BIN requests an executable stack" ;;
+esac
+
+printf 'release binary ok: %s highest GLIBC symbol %s (maximum %s), links only %s\n' \
+    "$(basename "$BIN")" "$highest" "$MAX_GLIBC" "$ALLOWED_LIBS"

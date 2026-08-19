@@ -1,0 +1,13 @@
+version: 2
+
+# Weekly updates for pinned GitHub Actions workflow dependencies.
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "tools"

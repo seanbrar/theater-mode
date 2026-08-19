@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,17 @@ from theater_mode.steam import (
     find_hero_art,
     steam_appid_for_window,
 )
+
+try:
+    import PIL  # noqa: F401
+
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
+
+# Pillow is an optional runtime dependency: without it secondary displays dim to plain
+# black. These tests exercise the compositing itself, so they need the real library.
+needs_pillow = unittest.skipUnless(HAS_PILLOW, "Pillow is not installed")
 
 
 class TestSteamDetection(unittest.TestCase):
@@ -74,6 +86,7 @@ class TestArtwork(unittest.TestCase):
                 self.assertIsNotNone(found)
                 self.assertEqual(found, art1)
 
+    @needs_pillow
     def test_fast_feather_mask_gradient(self) -> None:
         width = 100
         fg_height = 80
@@ -103,6 +116,19 @@ class TestArtwork(unittest.TestCase):
             result = build_artwork("99999", 1920, 1080, 0.4)
             self.assertIsNone(result)
 
+    def test_build_artwork_without_pillow_degrades_instead_of_raising(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hero = Path(tmp_dir) / "hero.png"
+            hero.write_bytes(b"not really an image")
+            with (
+                patch.dict(sys.modules, {"PIL": None}),
+                patch("theater_mode.steam.find_hero_art", return_value=hero),
+                patch("theater_mode.steam.ART_CACHE", Path(tmp_dir) / "cache"),
+                self.assertLogs("theater-moded", level="ERROR"),
+            ):
+                self.assertIsNone(build_artwork("12345", 320, 240, 0.4))
+
+    @needs_pillow
     def test_build_artwork_generates_and_caches_argb(self) -> None:
         from PIL import Image
 
@@ -138,6 +164,7 @@ class TestArtwork(unittest.TestCase):
                 self.assertEqual(cached_target, target)
                 self.assertEqual(target.stat().st_mtime_ns, mtime_before)
 
+    @needs_pillow
     def test_build_artwork_crops_center_and_writes_bgra_pixels(self) -> None:
         from PIL import Image
 
@@ -170,6 +197,7 @@ class TestArtwork(unittest.TestCase):
             self.assertGreater(rendered.getpixel((37, 20))[2], 150)
             self.assertEqual(rendered.getpixel((20, 20))[3], 255)
 
+    @needs_pillow
     def test_build_artwork_contains_portrait_art_and_feathers_its_sides(self) -> None:
         from PIL import Image
 

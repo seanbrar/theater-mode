@@ -4,31 +4,62 @@ Dims inactive monitors and displays the active Steam game's library artwork on t
 
 A lightweight KWin script reports window lifecycle events via D-Bus to a background daemon (`theater-moded`), which controls a native Wayland layer-shell helper (`theater-dimmer`) to smoothly fade and overlay secondary displays.
 
-Built for KDE Plasma 6 on Wayland.
+Built for KDE Plasma 6.2+ on Wayland.
 
 ## Installation
 
 ```sh
-./install.sh          # Copy files into place
-./install.sh --link   # Symlink files for live development
+curl -fsSL https://raw.githubusercontent.com/seanbrar/theater-mode/main/get.sh | bash
 ```
 
-Files are installed to standard user locations under `$HOME` without root privileges. The daemon runs with active cinematic dimming enabled out of the box with zero configuration required.
+That downloads the latest release, checks it against the published checksum, installs into `$HOME`, and starts the daemon. There is no second step: the KWin script is enabled for you and cinematic dimming is active with built-in defaults.
 
-To uninstall:
+The published x86_64 build needs no root, compiler, or package layering, so it installs the same way on ordinary distributions and on atomic ones like Bazzite, Fedora Silverblue, and SteamOS. Other architectures currently use the source installation below.
+
+On SteamOS this means desktop mode, and only from 3.8 onward, where the Plasma session defaults to Wayland. Earlier releases default to X11, where the overlay cannot run.
+
+Prefer not to pipe a script into a shell? Download the tarball from [Releases](https://github.com/seanbrar/theater-mode/releases), then:
+
 ```sh
-./install.sh --uninstall
+tar xzf theater-mode-v*-linux-x86_64.tar.gz
+cd theater-mode-v*-linux-x86_64
+./install.sh
 ```
 
-### Post-Install Setup
+### Updating and removing
 
-1. **Enable the KWin Script**:
-   Open **System Settings → Window Management → KWin Scripts** and enable **Theater Mode Detector**.
+```sh
+theater-mode update           # Upgrade to the latest release
+theater-mode update --check   # Only report whether one is available
+theater-mode uninstall        # Remove it, keeping your settings
+```
 
-2. **Verify Daemon**:
-   ```sh
-   theater-mode status
-   ```
+Your configuration, service drop-ins, and artwork cache survive both. Uninstalling lists what it keeps before it removes anything.
+Updating also preserves whether the service and KWin integration are currently active.
+
+### Installing from source
+
+A source install compiles the `theater-dimmer` helper, so it additionally needs a C compiler, `make`, `pkg-config`, and the libwayland development headers.
+
+```sh
+git clone https://github.com/seanbrar/theater-mode
+cd theater-mode
+./install.sh           # Build the helper and install
+```
+
+### Requirements
+
+Python 3.12+, PyGObject, and a KDE Plasma **6.2 or newer** Wayland session. Pillow is optional; without it secondary displays dim to plain black instead of showing game artwork.
+
+The 6.2 floor is not cosmetic: the dimmer draws through the `wp_alpha_modifier_v1` Wayland protocol, which KWin first implemented in Plasma 6.2. On 6.0 and 6.1 the daemon starts but the overlay helper exits reporting the missing protocol.
+
+If the KDE configuration tools are unavailable, the installer says so and asks you to enable **Theater Mode Detector** once under **System Settings → Window Management → KWin Scripts**. Otherwise this is handled for you.
+
+Check that it is working with:
+
+```sh
+theater-mode status
+```
 
 ## Configuration
 
@@ -227,6 +258,7 @@ When enabled, `theater-mode` locates cached Steam library hero artwork at `~/.lo
 | `~/.local/bin/theater-dimmer` | Native C Wayland helper rendering overlay surfaces. |
 | `~/.local/share/kwin/scripts/theater-detect/` | KWin script reporting window events. |
 | `/sys/class/drm/card*-*/edid` | Read-only source for per-display identity matching. |
+| `~/.local/share/theater-mode/install.sh` | Copy of the installer, so `theater-mode uninstall` works without the release archive. |
 | `~/.config/theater-mode/config.toml` | User configuration file. |
 | `~/.config/systemd/user/theater-mode.service` | Systemd user service unit. |
 | `~/.cache/theater-mode/` | Generated artwork cache. |

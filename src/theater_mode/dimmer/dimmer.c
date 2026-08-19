@@ -20,7 +20,9 @@
  *   QUIT
  */
 
-#define _GNU_SOURCE
+/* _DEFAULT_SOURCE, not _GNU_SOURCE: prevents the C23 strtol symbol promotion that raises the
+ * glibc floor. Paired with -std=gnu17 in the Makefile; both are required. */
+#define _DEFAULT_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
@@ -31,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -40,6 +43,11 @@
 #include "single-pixel-buffer-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+
+/* Stamped by the Makefile from src/theater_mode/__init__.py. */
+#ifndef THEATER_DIMMER_VERSION
+#define THEATER_DIMMER_VERSION "unknown"
+#endif
 
 #define MAX_OUTPUTS 32
 #define BUFFER_SIZE 4096
@@ -880,8 +888,41 @@ static void handle_command(struct dimmer_app *app, char *line) {
     }
 }
 
+static void print_usage(FILE *out) {
+    fprintf(out,
+            "theater-dimmer %s — Wayland layer-shell display dimmer.\n"
+            "\n"
+            "Started and driven by theater-moded; commands arrive on stdin and it\n"
+            "exits when stdin closes. Running it by hand is only useful for testing.\n"
+            "\n"
+            "Usage: theater-dimmer [--version] [--help]\n"
+            "\n"
+            "Commands (one per line on stdin):\n"
+            "  ART <output> <width> <height> <path>   Stage artwork for an output\n"
+            "  ART <output>                           Clear staged artwork\n"
+            "  LAYER <output> <overlay|bottom>        Set stacking layer\n"
+            "  DIM <outputs> <alpha> <duration> [easing]\n"
+            "  DIM_OUTPUT <output> <alpha> <duration> [easing]\n"
+            "  FADE_OUT <duration> [easing]\n"
+            "  STATUS\n"
+            "  QUIT\n",
+            THEATER_DIMMER_VERSION);
+}
+
 int main(int argc, char **argv) {
-    (void)argc; (void)argv;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
+            printf("theater-dimmer %s\n", THEATER_DIMMER_VERSION);
+            return 0;
+        }
+        if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+            print_usage(stdout);
+            return 0;
+        }
+        fprintf(stderr, "theater-dimmer: unknown option: %s\n", argv[i]);
+        print_usage(stderr);
+        return 2;
+    }
 
     static struct dimmer_app app;
 

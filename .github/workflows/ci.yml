@@ -5,125 +5,185 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: bin/check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+  native:
+    name: native checks and install lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - name: Install build and runtime dependencies
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev pkg-config python3-gi
-      - name: Install ruff
+            libwayland-dev pkg-config python3-gi python3-pil shellcheck
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.12.1"
+          enable-cache: true
+
+      - name: Install Ruff
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: uv tool install "ruff>=0.16,<0.17"
-      - run: ./bin/check
+          uv tool install "ruff>=0.16,<0.17"
+          echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
+
+      - name: Build, lint, and test
+        run: ./bin/check
+
+      - name: Test source install lifecycle
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          fake="$RUNNER_TEMP/source-install"
+          bin="$fake/bin & tools"
+          mkdir -p "$fake"
+
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+              HOME="$fake" XDG_BIN_HOME="$bin" ./install.sh --no-service
+
+          for file in "$bin/theater-mode" "$bin/theater-moded" "$bin/theater-dimmer" \
+                      "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
+                      "$fake/.local/share/theater-mode/config.reference.toml" \
+                      "$fake/.local/share/kwin/scripts/theater-detect/metadata.json" \
+                      "$fake/.config/systemd/user/theater-mode.service"; do
+            [ -e "$file" ] || fail "install omitted $file"
+          done
+
+          unit="$fake/.config/systemd/user/theater-mode.service"
+          [ "$(sed -n 's|^ExecStart=/usr/bin/env -- "\(.*\)"$|\1|p' "$unit")" = \
+            "$bin/theater-moded" ] || fail "unit contains the wrong daemon path"
+          systemd-analyze verify "$unit"
+
+          [ ! -e "$fake/.local/share/theater-mode/lib/theater_mode/dimmer" ] \
+            || fail "dimmer sources leaked into the install"
+          [ -z "$(find "$fake/.local/share/theater-mode/lib" -name __pycache__ -print -quit)" ] \
+            || fail "bytecode leaked into the install"
+
+          ambient="$RUNNER_TEMP/ambient/theater_mode"
+          mkdir -p "$ambient"
+          printf '%s\n' '# Deliberately incomplete ambient package.' > "$ambient/__init__.py"
+          (cd / && env -i PATH=/usr/bin:/bin HOME="$fake" \
+            PYTHONPATH="$RUNNER_TEMP/ambient" "$bin/theater-mode" --help >/dev/null) \
+            || fail "installed client preferred an ambient Python package"
+
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+              HOME="$fake" XDG_BIN_HOME="$bin" \
+              "$fake/.local/share/theater-mode/install.sh" --uninstall --no-service --yes
+          [ "$(find "$fake" \( -type f -o -type l \) | wc -l)" -eq 0 ] \
+            || fail "uninstall left files behind"
+
+      - name: Test release archive lifecycle
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/dist"
+          fake="$RUNNER_TEMP/release-home"
+          ./bin/make-release \
+            --dimmer-bin src/theater_mode/dimmer/theater-dimmer --outdir "$out"
+          tar xzf "$out"/*.tar.gz -C "$RUNNER_TEMP"
+          root=$(find "$RUNNER_TEMP" -maxdepth 1 -type d -name 'theater-mode-v*' -print -quit)
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+            HOME="$fake" "$root/install.sh" --no-service
+          test -f "$fake/.local/share/theater-mode/lib/theater_mode/update.py"
+          "$fake/.local/bin/theater-dimmer" --version
+          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+            HOME="$fake" "$fake/.local/share/theater-mode/install.sh" \
+              --uninstall --no-service --yes
+          [ "$(find "$fake" \( -type f -o -type l \) | wc -l)" -eq 0 ]
+
+      # The path every 'theater-mode update' takes: install.sh --preserve-service replacing
+      # an existing install in place. Nothing else in CI exercises it, and a regression here
+      # breaks upgrades for everyone already running theater-mode.
+      - name: Test the in-place upgrade path
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+          fake="$RUNNER_TEMP/upgrade-home"
+          root=$(find "$RUNNER_TEMP" -maxdepth 1 -type d -name 'theater-mode-v*' -print -quit)
+          run() {
+            env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+              HOME="$fake" "$@"
+          }
+
+          run "$root/install.sh" --no-service
+          # Prove the second run actually replaces files rather than skipping them.
+          echo 'stale' > "$fake/.local/bin/theater-dimmer"
+          printf 'stale\n' >> "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py"
+
+          run "$root/install.sh" --preserve-service
+
+          run "$fake/.local/bin/theater-dimmer" --version >/dev/null \
+            || fail "upgrade left an unusable theater-dimmer"
+          grep -q '^stale$' "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
+            && fail "upgrade did not replace the installed package"
+          for file in "$fake/.local/bin/theater-mode" "$fake/.local/bin/theater-moded" \
+                      "$fake/.local/share/theater-mode/install.sh" \
+                      "$fake/.config/systemd/user/theater-mode.service"; do
+            [ -e "$file" ] || fail "upgrade lost $file"
+          done
+          systemd-analyze verify "$fake/.config/systemd/user/theater-mode.service"
+
+          run "$fake/.local/share/theater-mode/install.sh" --uninstall --no-service --yes
+          [ "$(find "$fake" \( -type f -o -type l \) | wc -l)" -eq 0 ] \
+            || fail "uninstall after upgrade left files behind"
+
+      - name: Test --build and --dimmer-bin selection
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+          root=$(find "$RUNNER_TEMP" -maxdepth 1 -type d -name 'theater-mode-v*' -print -quit)
+          run() {
+            env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
+              HOME="$1" "${@:2}"
+          }
+
+          # --build must compile even though the archive ships a prebuilt helper.
+          built="$RUNNER_TEMP/build-home"
+          run "$built" "$root/install.sh" --no-service --build
+          run "$built" "$built/.local/bin/theater-dimmer" --version >/dev/null \
+            || fail "--build produced an unusable helper"
+
+          # --dimmer-bin must install exactly the file it is given.
+          given="$RUNNER_TEMP/given-home"
+          run "$given" "$root/install.sh" --no-service \
+            --dimmer-bin src/theater_mode/dimmer/theater-dimmer
+          cmp -s src/theater_mode/dimmer/theater-dimmer \
+                 "$given/.local/bin/theater-dimmer" \
+            || fail "--dimmer-bin did not install the helper it was given"
+
+          # A helper that cannot execute must be refused before anything is installed.
+          bad="$RUNNER_TEMP/bad-helper"
+          printf '#!/nonexistent\n' > "$bad"
+          chmod +x "$bad"
+          if run "$RUNNER_TEMP/bad-home" "$root/install.sh" --no-service \
+               --dimmer-bin "$bad" 2>/dev/null; then
+            fail "installer accepted a helper that cannot run"
+          fi
+
+      - name: Repository remains clean
+        run: git diff --exit-code && test -z "$(git status --porcelain)"
 
   tests:
     name: tests (py${{ matrix.python }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Run test suite
-        run: |
-          uv run --no-project --python "${{ matrix.python }}" \
-            python -m unittest discover -s tests -t . -v
-
-  lint-shell-js:
-    name: shell and JS
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - run: shellcheck install.sh bin/check
-      - run: node --check kwin/theater-detect/contents/code/main.js
-      - run: python3 -c 'import json; json.load(open("kwin/theater-detect/metadata.json"))'
-
-  install-lifecycle:
-    name: install and uninstall (${{ matrix.mode }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [copy, link]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install build and runtime dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwayland-dev pkg-config python3-gi
-      - name: Stage into a clean HOME
-        run: |
-          set -euo pipefail
-          FAKE="$RUNNER_TEMP/home"
-          BIN="$FAKE/bin & tools"
-          mkdir -p "$FAKE"
-          [ "${{ matrix.mode }}" = link ] && LINK=--link || LINK=
-          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
-              HOME="$FAKE" XDG_BIN_HOME="$BIN" ./install.sh --no-service $LINK
-
-          fail() { echo "::error::$*"; exit 1; }
-          for f in "$BIN/theater-mode" "$BIN/theater-moded" "$BIN/theater-dimmer" \
-                   "$FAKE/.local/share/theater-mode/lib/theater_mode/__init__.py" \
-                   "$FAKE/.local/share/theater-mode/config.reference.toml" \
-                   "$FAKE/.local/share/kwin/scripts/theater-detect/metadata.json" \
-                   "$FAKE/.config/systemd/user/theater-mode.service"; do
-            [ -e "$f" ] || fail "missing after install: $f"
-          done
-
-          UNIT="$FAKE/.config/systemd/user/theater-mode.service"
-          [ "$(sed -n 's|^ExecStart=/usr/bin/env -- "\(.*\)"$|\1|p' "$UNIT")" = "$BIN/theater-moded" ] \
-            || fail "ExecStart does not contain the daemon path"
-          systemd-analyze verify "$UNIT" \
-            || fail "generated systemd unit is invalid"
-
-          if [ "${{ matrix.mode }}" = copy ]; then
-            [ ! -e "$FAKE/.local/share/theater-mode/lib/theater_mode/dimmer" ] \
-              || fail "dimmer/ leaked into the installed package"
-            [ -z "$(find "$FAKE/.local/share/theater-mode/lib" -name __pycache__ -print -quit)" ] \
-              || fail "__pycache__ leaked into the installed package"
-          fi
-
-          AMBIENT="$RUNNER_TEMP/ambient/theater_mode"
-          mkdir -p "$AMBIENT"
-          printf '%s\n' '# Deliberately incomplete ambient package.' > "$AMBIENT/__init__.py"
-          ( cd / && env -i PATH=/usr/bin:/bin HOME="$FAKE" \
-              PYTHONPATH="$RUNNER_TEMP/ambient" \
-              "$BIN/theater-mode" --help >/dev/null ) \
-            || fail "installed client did not prefer its bundled theater_mode package"
-
-      - name: Uninstall and verify nothing is left
-        run: |
-          set -euo pipefail
-          FAKE="$RUNNER_TEMP/home"
-          BIN="$FAKE/bin & tools"
-          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
-              HOME="$FAKE" XDG_BIN_HOME="$BIN" ./install.sh --uninstall --no-service --yes
-          leftovers=$(find "$FAKE" -type f -o -type l | wc -l)
-          [ "$leftovers" -eq 0 ] || {
-            find "$FAKE" -type f -o -type l
-            echo "::error::uninstall left $leftovers file(s) behind"; exit 1;
-          }
-
-      - name: Repository must be unchanged by a link install
-        run: git diff --exit-code && git status --porcelain
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install Pillow
+      - run: python -m unittest discover -s tests -t . -v

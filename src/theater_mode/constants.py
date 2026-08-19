@@ -11,17 +11,27 @@ BUS_NAME = "org.theatermode.TheaterMode"
 OBJECT_PATH = "/org/theatermode/TheaterMode"
 INTERFACE = "org.theatermode.TheaterMode"
 
+
+def _xdg_dir(variable: str, fallback: str) -> Path:
+    """Resolve an XDG base directory. An empty value counts as unset, as the spec requires."""
+    return Path(os.environ.get(variable) or Path.home() / fallback)
+
+
+# Installed Layout
+APP_DATA = _xdg_dir("XDG_DATA_HOME", ".local/share") / "theater-mode"
+
 # Steam & Artwork Cache Paths
 STEAM_LIBRARY_CACHE = (
-    Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share"))
-    / "Steam"
-    / "appcache"
-    / "librarycache"
+    _xdg_dir("XDG_DATA_HOME", ".local/share") / "Steam" / "appcache" / "librarycache"
 )
-ART_CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "theater-mode"
+ART_CACHE = _xdg_dir("XDG_CACHE_HOME", ".cache") / "theater-mode"
 
 # Wayland Dimmer
 DIMMER_BINARY_NAME = "theater-dimmer"
+
+# Release distribution
+PROJECT_REPO = "seanbrar/theater-mode"
+RELEASE_API = f"https://api.github.com/repos/{PROJECT_REPO}/releases/latest"
 
 # Steam Detection Patterns
 STEAM_APP_CLASS = re.compile(r"^steam_app_(\d+)$")
