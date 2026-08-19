@@ -6,6 +6,15 @@ set -euo pipefail
 
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+wait_for_jobs() {
+    local label=$1 pid failed=0
+    shift
+    for pid in "$@"; do
+        wait "$pid" || failed=1
+    done
+    [ "$failed" -eq 0 ] || die "$label failed"
+}
+
 # Report the binary that actually resolved to make host tool shadowing visible.
 need() {
     local name=$1 path version
@@ -18,8 +27,15 @@ need() {
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# Sanitizers need the plain allocator, so _FORTIFY_SOURCE is left off these builds only.
+SAN_FLAGS=(-std=gnu17 -O0 -g "-fsanitize=address,undefined" -fno-omit-frame-pointer -Wall -Wextra -Werror)
+
 echo "[check] Toolchain:"
 need cc
+CC_BIN="$(command -v cc)"
 need make
 need pkg-config
 need python3
@@ -28,20 +44,47 @@ need readelf
 need shellcheck
 need ruff
 
-echo "[check] Building the Wayland dimmer..."
+echo "[check] Building the Wayland dimmer and artwork helper..."
 make -C src/theater_mode/dimmer clean >/dev/null
+make -C src/theater_mode/art clean >/dev/null
 make -C src/theater_mode/dimmer \
-    CFLAGS="-O2 -Wall -Wextra -pedantic -Werror -fstack-protector-strong -fPIE" >/dev/null
+    CFLAGS="-O2 -Wall -Wextra -pedantic -Werror -fstack-protector-strong -fPIE" >/dev/null &
+dimmer_pid=$!
+make -C src/theater_mode/art \
+    CFLAGS="-O2 -Wall -Wextra -pedantic -Werror -fstack-protector-strong -fPIE" >/dev/null &
+art_pid=$!
+wait_for_jobs "native helper build" "$dimmer_pid" "$art_pid"
 
-echo "[check] Verifying theater-dimmer reports the package version..."
+echo "[check] Verifying helper binaries report the package version..."
 PKG_VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/theater_mode/__init__.py)"
 [ -n "$PKG_VERSION" ] || die "could not read __version__ from src/theater_mode/__init__.py"
-BIN_VERSION="$(src/theater_mode/dimmer/theater-dimmer --version | awk '{print $2}')"
-[ "$PKG_VERSION" = "$BIN_VERSION" ] \
-    || die "theater-dimmer reports $BIN_VERSION but the package is $PKG_VERSION"
+DIMMER_VERSION="$(src/theater_mode/dimmer/theater-dimmer --version | awk '{print $2}')"
+[ "$PKG_VERSION" = "$DIMMER_VERSION" ] \
+    || die "theater-dimmer reports $DIMMER_VERSION but the package is $PKG_VERSION"
+ART_VERSION="$(src/theater_mode/art/theater-art --version | awk '{print $2}')"
+[ "$PKG_VERSION" = "$ART_VERSION" ] \
+    || die "theater-art reports $ART_VERSION but the package is $PKG_VERSION"
 
 echo "[check] Verifying the release ABI floor..."
 ./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer
+./bin/check-abi-floor src/theater_mode/art/theater-art 2.35 "libc.so.6 libm.so.6"
+
+echo "[check] Building the artwork helper and unit tests with ASan and UBSan..."
+"$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/art -DTHEATER_ART_VERSION='"test"' \
+    tests/art/test_pipeline.c -lm -o "$WORK/test_pipeline" &
+test_pid=$!
+"$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/art -DTHEATER_ART_VERSION="\"$PKG_VERSION\"" \
+    src/theater_mode/art/main.c src/theater_mode/art/pipeline.c -lm -o "$WORK/theater-art-asan" &
+art_asan_pid=$!
+wait_for_jobs "sanitizer build" "$test_pid" "$art_asan_pid"
+
+echo "[check] Running artwork unit tests..."
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+    "$WORK/test_pipeline" tests/fixtures/artwork_reference
+
+echo "[check] Running artwork oracle visual verification (instrumented)..."
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+    THEATER_ART_BIN="$WORK/theater-art-asan" python3 tests/verify_oracle.py
 
 echo "[check] Verifying config.reference.toml matches the schema..."
 PYTHONPATH="$REPO_DIR/src" python3 -c '
@@ -56,6 +99,20 @@ if current != generate_reference_config():
 echo "[check] Checking the KWin script and its metadata..."
 node --check kwin/theater-detect/contents/code/main.js
 python3 -c 'import json; json.load(open("kwin/theater-detect/metadata.json"))'
+
+echo "[check] Checking GitHub Actions workflow YAML syntax..."
+# Syntax only, deliberately not Actions schema validation: a bad indent silently disabling
+# every workflow is the failure this catches, and PyYAML must be present or it catches nothing.
+python3 -c '
+import glob, sys
+import yaml
+for f in sorted(glob.glob(".github/workflows/*.yml")):
+    with open(f, encoding="utf-8") as fh:
+        try:
+            yaml.safe_load(fh)
+        except yaml.YAMLError as exc:
+            sys.exit(f"{f}: {exc}")
+'
 
 echo "[check] Running ShellCheck..."
 shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor

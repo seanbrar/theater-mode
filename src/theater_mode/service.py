@@ -17,6 +17,25 @@ VariantFactory = Callable[[str, tuple[Any, ...]], Any]
 
 def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., None]:
     """Create a D-Bus method dispatch closure bound to a Daemon instance."""
+    void_methods: dict[str, Callable[..., Any]] = {
+        "WindowOpened": daemon.window_opened,
+        "WindowChanged": daemon.window_changed,
+        "WindowClosed": daemon.window_closed,
+        "SnapshotBegin": daemon.snapshot_begin,
+        "SnapshotEnd": daemon.snapshot_end,
+    }
+    string_methods: dict[str, Callable[..., str]] = {
+        "Status": daemon.status,
+        "Simulate": daemon.simulate,
+        "Clear": daemon.clear,
+        "GetOutputs": daemon.get_outputs,
+        "GetResolved": daemon.get_resolved,
+        "GetDiagnostics": daemon.get_diagnostics,
+        "Preview": daemon.preview,
+        "RevertPreview": daemon.revert_preview,
+        "Commit": daemon.commit,
+        "Reload": daemon.reload,
+    }
 
     def handle_call(
         conn: Any,
@@ -30,52 +49,13 @@ def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., 
     ) -> None:
         try:
             args = params.unpack() if params is not None else ()
-            match method:
-                case "WindowOpened":
-                    daemon.window_opened(*args)
-                case "WindowChanged":
-                    daemon.window_changed(*args)
-                case "WindowClosed":
-                    daemon.window_closed(*args)
-                case "SnapshotBegin":
-                    daemon.snapshot_begin()
-                case "SnapshotEnd":
-                    daemon.snapshot_end()
-                case "Status":
-                    invocation.return_value(make_variant("(s)", (daemon.status(),)))
-                    return
-                case "Simulate":
-                    invocation.return_value(make_variant("(s)", (daemon.simulate(*args),)))
-                    return
-                case "Clear":
-                    invocation.return_value(make_variant("(s)", (daemon.clear(),)))
-                    return
-                case "GetOutputs":
-                    invocation.return_value(make_variant("(s)", (daemon.get_outputs(),)))
-                    return
-                case "GetResolved":
-                    invocation.return_value(make_variant("(s)", (daemon.get_resolved(),)))
-                    return
-                case "GetDiagnostics":
-                    invocation.return_value(make_variant("(s)", (daemon.get_diagnostics(),)))
-                    return
-                case "Preview":
-                    invocation.return_value(make_variant("(s)", (daemon.preview(*args),)))
-                    return
-                case "RevertPreview":
-                    invocation.return_value(make_variant("(s)", (daemon.revert_preview(),)))
-                    return
-                case "Commit":
-                    invocation.return_value(make_variant("(s)", (daemon.commit(*args),)))
-                    return
-                case "Reload":
-                    invocation.return_value(make_variant("(s)", (daemon.reload(),)))
-                    return
-                case _:
-                    invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)
-                    return
-
-            invocation.return_value(None)
+            if fn := void_methods.get(method):
+                fn(*args)
+                invocation.return_value(None)
+            elif fn := string_methods.get(method):
+                invocation.return_value(make_variant("(s)", (fn(*args),)))
+            else:
+                invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)
         except Exception:
             # Prevent unhandled exceptions in individual window events from terminating the daemon
             log.exception("error handling D-Bus method %s", method)

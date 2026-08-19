@@ -187,15 +187,9 @@ class OutputOverrideConfig:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            k: v
-            for k, v in {
-                "placement": self.placement,
-                "dim_factor": self.dim_factor,
-                "art": self.art,
-                "duration": self.duration,
-                "curve": self.curve,
-            }.items()
-            if v is not None
+            field: val
+            for field in ("placement", "dim_factor", "art", "duration", "curve")
+            if (val := getattr(self, field)) is not None
         }
 
 

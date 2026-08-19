@@ -150,9 +150,6 @@ theater-mode clear
 Theater-mode uses artwork already downloaded by Steam. Open the game in your Steam
 library once and try again. Native and Flatpak Steam are both detected.
 
-Artwork also needs an image library called Pillow. If it is unavailable, the installer
-warns you and theater-mode uses a plain dark screen instead. Everything else still works.
-
 **The `theater-mode` command is not found**
 
 Close Konsole, open it again, and retry. If it is still missing, run the command using its
@@ -193,7 +190,7 @@ theater-mode to watch, so Game Mode itself is not supported.
 ## Installing from source
 
 A source install needs Python 3.12 or newer, PyGObject, a C compiler, `make`, `pkg-config`,
-and the libwayland development headers. Pillow is optional and adds artwork support.
+and the libwayland development headers.
 
 ```sh
 git clone https://github.com/seanbrar/theater-mode

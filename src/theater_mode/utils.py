@@ -1,7 +1,9 @@
-"""Utility functions for data conversion and Linux /proc process inspection."""
+"""Utility functions for data conversion, process inspection, and binary discovery."""
 
 from __future__ import annotations
 
+import os
+import shutil
 from pathlib import Path
 
 
@@ -47,8 +49,28 @@ def read_process_environ(pid: int) -> dict[str, str]:
 
     environ = {}
     for entry in raw.split(b"\0"):
-        if not entry:
-            continue
-        key, _, value = entry.partition(b"=")
-        environ[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+        if entry:
+            key, _, value = entry.partition(b"=")
+            environ[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
     return environ
+
+
+def find_helper_binary(name: str, env_var: str, subdir: str) -> Path | None:
+    """Locate a compiled helper executable (from env override, package dir, XDG bin, or PATH)."""
+    env_path = os.environ.get(env_var)
+    if env_path and (p := Path(env_path)).is_file() and os.access(p, os.X_OK):
+        return p
+
+    pkg_bin = Path(__file__).parent / subdir / name
+    if pkg_bin.is_file() and os.access(pkg_bin, os.X_OK):
+        return pkg_bin
+
+    local_bin = Path(os.environ.get("XDG_BIN_HOME", Path.home() / ".local/bin")) / name
+    if local_bin.is_file() and os.access(local_bin, os.X_OK):
+        return local_bin
+
+    which_bin = shutil.which(name)
+    if which_bin:
+        return Path(which_bin)
+
+    return None

@@ -1,4 +1,4 @@
-"""Unit tests for data conversion and process inspection utilities."""
+"""Unit tests for data conversion, process inspection, and binary discovery utilities."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from theater_mode.utils import (
+    find_helper_binary,
     parse_bool,
     parse_int,
     read_process_cmdline,
@@ -56,6 +57,35 @@ class TestUtils(unittest.TestCase):
                 self.assertEqual(env.get("SteamGameId"), "1671210")
                 self.assertEqual(env.get("USER"), "sean")
                 self.assertEqual(env.get("DISPLAY"), ":0")
+
+    def test_find_helper_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_bin = Path(tmp_dir) / "helper-test"
+            fake_bin.touch(mode=0o755)
+
+            # 1. Environment variable override
+            with patch.dict("os.environ", {"TEST_HELPER_BIN": str(fake_bin)}):
+                self.assertEqual(
+                    find_helper_binary("helper-test", "TEST_HELPER_BIN", "sub"), fake_bin
+                )
+
+            # 2. PATH resolution fallback
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                patch("pathlib.Path.is_file", return_value=False),
+                patch("shutil.which", return_value=str(fake_bin)),
+            ):
+                self.assertEqual(
+                    find_helper_binary("helper-test", "TEST_HELPER_BIN", "sub"), fake_bin
+                )
+
+            # 3. Not found
+            with (
+                patch.dict("os.environ", {}, clear=True),
+                patch("pathlib.Path.is_file", return_value=False),
+                patch("shutil.which", return_value=None),
+            ):
+                self.assertIsNone(find_helper_binary("helper-test", "TEST_HELPER_BIN", "sub"))
 
 
 if __name__ == "__main__":

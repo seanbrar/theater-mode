@@ -52,8 +52,9 @@ STEAM_LIBRARY_CACHES = (
 )
 ART_CACHE = _xdg_dir("XDG_CACHE_HOME", ".cache") / "theater-mode"
 
-# Wayland Dimmer
+# Helper Binaries
 DIMMER_BINARY_NAME = "theater-dimmer"
+ART_BINARY_NAME = "theater-art"
 
 # Release distribution
 PROJECT_REPO = "seanbrar/theater-mode"

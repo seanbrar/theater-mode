@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import override
@@ -22,6 +20,7 @@ from theater_mode.display.drm import output_identities, output_modes
 from theater_mode.display.edid import OutputIdentity
 from theater_mode.effects.base import Effect, EffectOptions
 from theater_mode.steam import artwork_render_size, build_artwork
+from theater_mode.utils import find_helper_binary
 
 log = logging.getLogger("theater-moded")
 
@@ -32,28 +31,7 @@ PLACEMENT_LAYERS = {"over_windows": "overlay", "behind_windows": "bottom"}
 
 def find_dimmer_binary() -> Path | None:
     """Locate the compiled theater-dimmer executable."""
-    env_path = os.environ.get("THEATER_DIMMER_BIN")
-    if env_path and Path(env_path).is_file() and os.access(env_path, os.X_OK):
-        return Path(env_path)
-
-    # Check sibling directory in repo/package
-    pkg_bin = Path(__file__).parent.parent / "dimmer" / DIMMER_BINARY_NAME
-    if pkg_bin.is_file() and os.access(pkg_bin, os.X_OK):
-        return pkg_bin
-
-    # Check user bin directory (~/.local/bin or $XDG_BIN_HOME)
-    local_bin = (
-        Path(os.environ.get("XDG_BIN_HOME", Path.home() / ".local/bin")) / DIMMER_BINARY_NAME
-    )
-    if local_bin.is_file() and os.access(local_bin, os.X_OK):
-        return local_bin
-
-    # Check PATH
-    which_bin = shutil.which(DIMMER_BINARY_NAME)
-    if which_bin:
-        return Path(which_bin)
-
-    return None
+    return find_helper_binary(DIMMER_BINARY_NAME, "THEATER_DIMMER_BIN", "dimmer")
 
 
 class DimEffect(Effect):

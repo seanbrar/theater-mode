@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Assert that a compiled theater-dimmer will load on every system we claim to support.
+# Assert that a compiled helper will load on every system we claim to support.
 #
-#   bin/check-abi-floor path/to/theater-dimmer [max_glibc]
+#   bin/check-abi-floor path/to/binary [max_glibc] [allowed_libs]
 #
 
 set -euo pipefail
@@ -11,12 +11,11 @@ die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 BIN="${1:-}"
 MAX_GLIBC="${2:-2.35}"
-[ -n "$BIN" ] || die "usage: $0 path/to/theater-dimmer [max_glibc]"
+ALLOWED_LIBS="${3:-libc.so.6 libm.so.6 libwayland-client.so.0}"
+[ -n "$BIN" ] || die "usage: $0 path/to/binary [max_glibc] [allowed_libs]"
 [ -f "$BIN" ] || die "no such file: $BIN"
 
 command -v readelf >/dev/null || die "readelf not found (install binutils)"
-
-ALLOWED_LIBS="libc.so.6 libm.so.6 libwayland-client.so.0"
 
 # --- glibc symbol versions -------------------------------------------------
 mapfile -t versions < <(readelf -V "$BIN" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV)

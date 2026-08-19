@@ -9,7 +9,7 @@ improvements are welcome. This guide describes the workflow enforced by CI.
 
 ### Prerequisites
 
-The full check needs Python 3.12+, PyGObject, Pillow, a C compiler, `make`, `pkg-config`,
+The full check needs Python 3.12+, PyGObject, PyYAML, a C compiler, `make`, `pkg-config`,
 the libwayland development headers, Ruff, ShellCheck, Node.js, and `readelf` (usually
 provided by `binutils`). KDE Plasma is required only for live desktop testing, not for
 the automated checks.
@@ -58,7 +58,7 @@ that first block with CI when results differ.
 ### Native setup
 
 Install the prerequisites listed above with your distribution's package manager. Common
-package names include `python3-gobject`/`python-gobject`, `python3-pillow`/`python-pillow`,
+package names include `python3-gobject`/`python-gobject`, `python3-yaml`/`python-yaml`,
 `libwayland-dev`/`wayland-devel`, `binutils`, `nodejs`, `shellcheck`, and `ruff`. Then run:
 
 ```bash

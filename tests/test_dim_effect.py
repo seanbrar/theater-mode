@@ -316,7 +316,7 @@ class TestHelperLifecycle(DimEffectTestCase):
 
 
 class TestBinaryDiscovery(unittest.TestCase):
-    @patch("theater_mode.effects.dim.shutil.which")
+    @patch("shutil.which")
     def test_find_dimmer_binary(self, mock_which) -> None:
         mock_which.return_value = "/usr/bin/theater-dimmer"
         self.assertIsNotNone(find_dimmer_binary())

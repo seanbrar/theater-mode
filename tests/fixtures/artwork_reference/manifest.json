@@ -1,0 +1,162 @@
+{
+  "hero_wide_to_16x9": {
+    "src_path": "hero_wide_to_16x9_input.jpg",
+    "src_size": [
+      960,
+      310
+    ],
+    "target_size": [
+      320,
+      240
+    ],
+    "dim_factor": 0.4,
+    "note": "letterbox vertical feather",
+    "ref_file": "hero_wide_to_16x9_ref_320x240_d40.argb",
+    "sha256": "8e220e1df9c3bdc47484eadfb407cb1aa48730898201623a178e83acb0a1987f",
+    "byte_len": 307200
+  },
+  "hero_16x9_to_16x9": {
+    "src_path": "hero_16x9_to_16x9_input.jpg",
+    "src_size": [
+      640,
+      360
+    ],
+    "target_size": [
+      320,
+      180
+    ],
+    "dim_factor": 0.0,
+    "note": "exact match opaque",
+    "ref_file": "hero_16x9_to_16x9_ref_320x180_d00.argb",
+    "sha256": "4682f5b56c0ac8213f8a7f5195fcebcc2838199ad059e5063a2148cad2a478aa",
+    "byte_len": 230400
+  },
+  "hero_16x9_to_ultrawide": {
+    "src_path": "hero_16x9_to_ultrawide_input.jpg",
+    "src_size": [
+      640,
+      360
+    ],
+    "target_size": [
+      420,
+      180
+    ],
+    "dim_factor": 0.5,
+    "note": "pillarbox horizontal feather",
+    "ref_file": "hero_16x9_to_ultrawide_ref_420x180_d50.argb",
+    "sha256": "3eb91b0db5e58ec5d6d824ac6083b5d5e03e97645edfe1a1ddcaeedf4799deed",
+    "byte_len": 302400
+  },
+  "hero_portrait_to_16x9": {
+    "src_path": "hero_portrait_to_16x9_input.jpg",
+    "src_size": [
+      300,
+      450
+    ],
+    "target_size": [
+      320,
+      180
+    ],
+    "dim_factor": 0.2,
+    "note": "portrait pillarbox",
+    "ref_file": "hero_portrait_to_16x9_ref_320x180_d20.argb",
+    "sha256": "61eecd212204d9aad3237a561c0078add73f1fea9da036d22d094a0114f14781",
+    "byte_len": 230400
+  },
+  "hero_1080p_wide": {
+    "src_path": "hero_1080p_wide_input.jpg",
+    "src_size": [
+      1920,
+      620
+    ],
+    "target_size": [
+      1920,
+      1080
+    ],
+    "dim_factor": 0.4,
+    "note": "full resolution letterbox",
+    "ref_file": "hero_1080p_wide_ref_1920x1080_d40.argb",
+    "sha256": "45ee0423d3cd6e5faae214ba1887afb240fd0c2da7a1ac900069e3222d6f4e9b",
+    "byte_len": 8294400
+  },
+  "hero_1600x900_downscale": {
+    "src_path": "hero_1600x900_downscale_input.jpg",
+    "src_size": [
+      1920,
+      620
+    ],
+    "target_size": [
+      1600,
+      900
+    ],
+    "dim_factor": 0.4,
+    "note": "lanczos downscale 1600x900",
+    "ref_file": "hero_1600x900_downscale_ref_1600x900_d40.argb",
+    "sha256": "4f247d567bb40d9ce1555a561ee0afcd81ec28971fc08c5db3e8bbb140cf2138",
+    "byte_len": 5760000
+  },
+  "hero_1280x1024_downscale": {
+    "src_path": "hero_1280x1024_downscale_input.jpg",
+    "src_size": [
+      1920,
+      620
+    ],
+    "target_size": [
+      1280,
+      1024
+    ],
+    "dim_factor": 0.3,
+    "note": "lanczos downscale 1280x1024",
+    "ref_file": "hero_1280x1024_downscale_ref_1280x1024_d30.argb",
+    "sha256": "18a4127b95d1cbcafd8acaec87e5387ac8603e09d839586ecf17e11c4a7e5056",
+    "byte_len": 5242880
+  },
+  "hero_highfreq_1600x900": {
+    "src_path": "hero_highfreq_1600x900_input.jpg",
+    "src_size": [
+      1920,
+      620
+    ],
+    "target_size": [
+      1600,
+      900
+    ],
+    "dim_factor": 0.4,
+    "note": "broadband lanczos downscale",
+    "ref_file": "hero_highfreq_1600x900_ref_1600x900_d40.argb",
+    "sha256": "4afa98787dd0d7f492ae5e2c3c94352de0a64caa5eca39df99f87e831629d5bc",
+    "byte_len": 5760000
+  },
+  "hero_highfreq_640x512": {
+    "src_path": "hero_highfreq_640x512_input.jpg",
+    "src_size": [
+      960,
+      310
+    ],
+    "target_size": [
+      640,
+      512
+    ],
+    "dim_factor": 0.3,
+    "note": "broadband lanczos downscale 0.667",
+    "ref_file": "hero_highfreq_640x512_ref_640x512_d30.argb",
+    "sha256": "7cb891b0fd3951c30e2cbeca7410de34b0581e03bf720741c82ec93ca58b2ad2",
+    "byte_len": 1310720
+  },
+  "hero_png_source": {
+    "src_path": "hero_png_source_input.png",
+    "src_size": [
+      640,
+      360
+    ],
+    "target_size": [
+      960,
+      540
+    ],
+    "dim_factor": 0.4,
+    "note": "png source letterbox",
+    "ref_file": "hero_png_source_ref_960x540_d40.argb",
+    "sha256": "04b86e3005b1f3f272a39d970a002fd42d96a92ed107a42db15a9040a78ccd97",
+    "byte_len": 2073600
+  }
+}

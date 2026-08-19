@@ -39,25 +39,23 @@ class TimerScheduler(Protocol):
 class GLibTimerScheduler:
     """Production timer scheduler using GLib's event loop."""
 
-    def timeout_add(self, delay_ms: int, callback: Callable[[], None]) -> Any:
+    def __init__(self) -> None:
         import gi
 
         gi.require_version("GLib", "2.0")
         from gi.repository import GLib
 
+        self._glib = GLib
+
+    def timeout_add(self, delay_ms: int, callback: Callable[[], None]) -> Any:
         def _wrapper() -> bool:
             callback()
             return False
 
-        return GLib.timeout_add(delay_ms, _wrapper)
+        return self._glib.timeout_add(delay_ms, _wrapper)
 
     def source_remove(self, tag: Any) -> None:
-        import gi
-
-        gi.require_version("GLib", "2.0")
-        from gi.repository import GLib
-
-        GLib.source_remove(tag)
+        self._glib.source_remove(tag)
 
 
 @dataclass

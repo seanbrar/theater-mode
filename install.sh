@@ -18,6 +18,7 @@ DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
 
 DIMMER_BIN="$BIN_DIR/theater-dimmer"
+ART_BIN="$BIN_DIR/theater-art"
 DAEMON="$BIN_DIR/theater-moded"
 CLIENT="$BIN_DIR/theater-mode"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
@@ -34,9 +35,14 @@ SERVICE=1  # 0 stages files, 1 activates a new install, 2 preserves activation s
 PREBUILT_DIMMER="$REPO/bin/theater-dimmer"
 BUILT_DIMMER="$REPO/src/theater_mode/dimmer/theater-dimmer"
 DIMMER_OVERRIDE=""
+PREBUILT_ART="$REPO/bin/theater-art"
+BUILT_ART="$REPO/src/theater_mode/art/theater-art"
+ART_OVERRIDE=""
 FORCE_BUILD=0
 DIMMER_SOURCE=""
-NEEDS_BUILD=0
+ART_SOURCE=""
+NEEDS_DIMMER_BUILD=0
+NEEDS_ART_BUILD=0
 
 # --------------------------------------------------------------------------
 
@@ -58,7 +64,9 @@ Options:
                    Replace files and restart the service only if it is already running
       --dimmer-bin=PATH
                    Install this prebuilt theater-dimmer instead of compiling one
-  -b, --build      Compile theater-dimmer from source, ignoring any prebuilt helper
+      --art-bin=PATH
+                   Install this prebuilt theater-art instead of compiling one
+  -b, --build      Compile helper binaries from source, ignoring prebuilt helpers
   -y, --yes        Answer yes to uninstall confirmation prompts non-interactively
   -h, --help       Show this help message
 EOF
@@ -120,9 +128,9 @@ render_unit() {
     info "$UNIT"
 }
 
-# Remove dimmer source/binary and bytecode cache from the installed lib directory.
+# Remove native-helper sources and bytecode caches from the installed library.
 prune_package_copy() {
-    rm -rf "$APP_DATA/lib/theater_mode/dimmer"
+    rm -rf "$APP_DATA/lib/theater_mode/dimmer" "$APP_DATA/lib/theater_mode/art"
     find "$APP_DATA/lib/theater_mode" -type d -name __pycache__ -prune -exec rm -rf {} +
 }
 
@@ -152,33 +160,40 @@ notify_kwin_reconfigure() {
     fi
 }
 
-resolve_dimmer() {
+resolve_helper() {
+    local kind=$1 override=$2 prebuilt=$3 built=$4
+    local source_var=$5 needs_build_var=$6 source needs_build
+
     if [ "$FORCE_BUILD" -eq 1 ]; then
-        DIMMER_SOURCE="$BUILT_DIMMER"
-        NEEDS_BUILD=1
-    elif [ -n "$DIMMER_OVERRIDE" ]; then
-        [ -e "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: file not found: $DIMMER_OVERRIDE"
-        [ -x "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: binary is not executable: $DIMMER_OVERRIDE (try: chmod +x '$DIMMER_OVERRIDE')"
-        DIMMER_SOURCE="$DIMMER_OVERRIDE"
-        NEEDS_BUILD=0
-    elif [ -f "$PREBUILT_DIMMER" ]; then
-        DIMMER_SOURCE="$PREBUILT_DIMMER"
-        NEEDS_BUILD=0
+        source=$built
+        needs_build=1
+    elif [ -n "$override" ]; then
+        [ -e "$override" ] || die "--$kind-bin: file not found: $override"
+        [ -x "$override" ] \
+            || die "--$kind-bin: binary is not executable: $override (try: chmod +x '$override')"
+        source=$override
+        needs_build=0
+    elif [ -f "$prebuilt" ]; then
+        source=$prebuilt
+        needs_build=0
     else
-        DIMMER_SOURCE="$BUILT_DIMMER"
-        NEEDS_BUILD=1
+        source=$built
+        needs_build=1
     fi
+
+    printf -v "$source_var" '%s' "$source"
+    printf -v "$needs_build_var" '%s' "$needs_build"
 }
 
-verify_dimmer() {
-    local candidate=$DIMMER_SOURCE staged="" out status
+verify_helper() {
+    local kind=$1 source=$2 candidate=$2 staged="" out status
     # tar applies the caller's umask, so an archive can arrive without its execute bit.
     # Verify a writable copy: the release tree it came from may be read-only.
     if [ ! -x "$candidate" ]; then
-        staged=$(mktemp) || die "could not stage $DIMMER_SOURCE for verification"
-        if ! cp "$DIMMER_SOURCE" "$staged"; then
+        staged=$(mktemp) || die "could not stage $source for verification"
+        if ! cp "$source" "$staged"; then
             rm -f "$staged"
-            die "could not stage $DIMMER_SOURCE for verification"
+            die "could not stage $source for verification"
         fi
         chmod +x "$staged"
         candidate=$staged
@@ -188,7 +203,7 @@ verify_dimmer() {
         rm -f "$staged"
     fi
     if [ "$status" -ne 0 ]; then
-        printf '\033[31merror:\033[0m the theater-dimmer helper cannot run on this system:\n' >&2
+        printf '\033[31merror:\033[0m the theater-%s helper cannot run on this system:\n' "$kind" >&2
         printf '  %s\n' "$out" >&2
         case "$out" in
             *GLIBC_*)
@@ -201,7 +216,7 @@ verify_dimmer() {
         esac
         exit 1
     fi
-    info "$out ($DIMMER_SOURCE)"
+    info "$out ($source)"
 }
 
 check_prerequisites() {
@@ -211,9 +226,11 @@ check_prerequisites() {
         python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null \
             || missing+=("python3 >= 3.12 (found $(python3 -V 2>&1))")
     fi
-    if [ "$NEEDS_BUILD" -eq 1 ]; then
+    if [ "$NEEDS_DIMMER_BUILD" -eq 1 ] || [ "$NEEDS_ART_BUILD" -eq 1 ]; then
         command -v gcc >/dev/null || command -v cc >/dev/null || missing+=("c compiler (gcc/clang)")
         command -v make >/dev/null || missing+=("make")
+    fi
+    if [ "$NEEDS_DIMMER_BUILD" -eq 1 ]; then
         command -v pkg-config >/dev/null || missing+=("pkg-config")
     fi
     if [ "$SERVICE" -ne 0 ]; then
@@ -227,7 +244,7 @@ check_prerequisites() {
 
     # Wayland development files are a build-time need only. Installing a prebuilt helper
     # requires just the runtime library, which every Wayland session already has.
-    if [ "$NEEDS_BUILD" -eq 1 ] && command -v pkg-config >/dev/null; then
+    if [ "$NEEDS_DIMMER_BUILD" -eq 1 ] && command -v pkg-config >/dev/null; then
         pkg-config --exists wayland-client \
             || missing+=("libwayland client development files (wayland-devel / libwayland-dev / wayland)")
     fi
@@ -242,12 +259,6 @@ check_prerequisites() {
     # Check if target bin directory is in user PATH
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR is not in your PATH. You may need to add it to your ~/.bashrc or ~/.profile."
-    fi
-
-    # Pillow is optional; without it, secondary screens dim to plain black without artwork
-    if command -v python3 >/dev/null && ! python3 -c 'import PIL' 2>/dev/null; then
-        warn "Pillow is not available, so game artwork cannot be generated."
-        warn "         Theater-mode will still work and dim displays to plain black."
     fi
 }
 
@@ -305,19 +316,30 @@ do_install() {
         exit 1
     fi
 
-    resolve_dimmer
+    resolve_helper dimmer "$DIMMER_OVERRIDE" "$PREBUILT_DIMMER" "$BUILT_DIMMER" \
+        DIMMER_SOURCE NEEDS_DIMMER_BUILD
+    resolve_helper art "$ART_OVERRIDE" "$PREBUILT_ART" "$BUILT_ART" \
+        ART_SOURCE NEEDS_ART_BUILD
     check_desktop_session
     check_prerequisites
 
-    if [ "$NEEDS_BUILD" -eq 1 ]; then
+    if [ "$NEEDS_DIMMER_BUILD" -eq 1 ]; then
         echo "Building theater-dimmer:"
         make -C "$REPO/src/theater_mode/dimmer"
     fi
-    verify_dimmer
+    verify_helper dimmer "$DIMMER_SOURCE"
+
+    if [ "$NEEDS_ART_BUILD" -eq 1 ]; then
+        echo "Building theater-art:"
+        make -C "$REPO/src/theater_mode/art"
+    fi
+    verify_helper art "$ART_SOURCE"
 
     echo "Installing theater-mode:"
     place "$DIMMER_SOURCE" "$DIMMER_BIN"
     chmod +x "$DIMMER_BIN"
+    place "$ART_SOURCE" "$ART_BIN"
+    chmod +x "$ART_BIN"
     place "$REPO/bin/theater-moded" "$DAEMON"
     chmod +x "$DAEMON"
     place "$REPO/bin/theater-mode" "$CLIENT"
@@ -422,7 +444,7 @@ EOF
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$DIMMER_BIN" "$DAEMON" "$CLIENT" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA")
+    local targets=("$DIMMER_BIN" "$ART_BIN" "$DAEMON" "$CLIENT" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA")
     local found=0
     for t in "${targets[@]}"; do
         if [ -e "$t" ] || [ -L "$t" ]; then
@@ -488,6 +510,10 @@ while [ $# -gt 0 ]; do
         --dimmer-bin)
             [ $# -ge 2 ] || die "--dimmer-bin requires a file path argument"
             DIMMER_OVERRIDE="$2"; shift ;;
+        --art-bin=*)     ART_OVERRIDE="${1#*=}" ;;
+        --art-bin)
+            [ $# -ge 2 ] || die "--art-bin requires a file path argument"
+            ART_OVERRIDE="$2"; shift ;;
         -y|--yes|-f|--force) FORCE=1 ;;
         -h|--help)       show_help; exit 0 ;;
         *)               die "unknown option '$1' (run with --help to see available options)" ;;

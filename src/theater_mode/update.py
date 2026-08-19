@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from theater_mode import __version__
-from theater_mode.constants import DIMMER_BINARY_NAME, PROJECT_REPO, RELEASE_API
+from theater_mode.constants import ART_BINARY_NAME, DIMMER_BINARY_NAME, PROJECT_REPO, RELEASE_API
 
 _TIMEOUT = 30
 _USER_AGENT = f"theater-mode/{__version__}"
@@ -146,13 +146,17 @@ def _run_installer(root: Path) -> None:
     """Hand off to the installer inside the freshly downloaded tree."""
     installer = root / "install.sh"
     dimmer = root / "bin" / DIMMER_BINARY_NAME
+    art = root / "bin" / ART_BINARY_NAME
     if not installer.is_file():
         raise UpdateError("the downloaded release contains no install.sh")
     if not dimmer.is_file():
         raise UpdateError("the downloaded release contains no theater-dimmer")
+    if not art.is_file():
+        raise UpdateError("the downloaded release contains no theater-art")
     try:
         installer.chmod(0o755)
         dimmer.chmod(0o755)
+        art.chmod(0o755)
         result = subprocess.run(  # noqa: S603
             [str(installer), "--preserve-service"], cwd=root, check=False
         )

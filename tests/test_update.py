@@ -160,6 +160,7 @@ class InstallerTests(unittest.TestCase):
             (root / "bin").mkdir()
             (root / "install.sh").touch()
             (root / "bin" / "theater-dimmer").touch()
+            (root / "bin" / "theater-art").touch()
             with patch("subprocess.run", return_value=SimpleNamespace(returncode=0)) as run:
                 update._run_installer(root)
         self.assertEqual(run.call_args.args[0][1], "--preserve-service")
@@ -167,10 +168,22 @@ class InstallerTests(unittest.TestCase):
     def test_missing_dimmer_is_rejected_before_install(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
+            (root / "bin").mkdir()
             (root / "install.sh").touch()
+            (root / "bin" / "theater-art").touch()
             with self.assertRaises(update.UpdateError) as caught:
                 update._run_installer(root)
         self.assertIn("theater-dimmer", str(caught.exception))
+
+    def test_missing_art_is_rejected_before_install(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "install.sh").touch()
+            (root / "bin" / "theater-dimmer").touch()
+            with self.assertRaises(update.UpdateError) as caught:
+                update._run_installer(root)
+        self.assertIn("theater-art", str(caught.exception))
 
 
 class ApplyGuardTests(unittest.TestCase):

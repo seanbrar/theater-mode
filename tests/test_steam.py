@@ -1,61 +1,58 @@
-"""Unit tests for Steam game detection and artwork handling."""
+"""Tests for Steam game detection and artwork handling."""
 
 from __future__ import annotations
 
-import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from theater_mode.constants import IGNORED_CLASSES
 from theater_mode.steam import (
-    _fast_feather_mask,
     artwork_render_size,
     build_artwork,
+    find_art_binary,
     find_hero_art,
     steam_appid_for_window,
 )
 
-try:
-    import PIL  # noqa: F401
-
-    HAS_PILLOW = True
-except ImportError:
-    HAS_PILLOW = False
-
-# Pillow is an optional runtime dependency: without it secondary displays dim to plain
-# black. These tests exercise the compositing itself, so they need the real library.
-needs_pillow = unittest.skipUnless(HAS_PILLOW, "Pillow is not installed")
-
 
 class TestSteamDetection(unittest.TestCase):
-    def test_ignored_classes(self) -> None:
-        self.assertIsNone(steam_appid_for_window("steam", 100))
-        self.assertIsNone(steam_appid_for_window("steamwebhelper", 101))
-        self.assertIsNone(steam_appid_for_window("plasmashell", 102))
-        self.assertIsNone(steam_appid_for_window("org.kde.plasmashell", 103))
-        self.assertIsNone(steam_appid_for_window("xwaylandvideobridge", 104))
-
     def test_steam_app_class_match(self) -> None:
-        self.assertEqual(steam_appid_for_window("steam_app_1671210", 200), "1671210")
-        self.assertEqual(steam_appid_for_window("steam_app_730", 201), "730")
+        self.assertEqual(steam_appid_for_window("steam_app_12345", 100), "12345")
 
-    @patch("theater_mode.steam.read_process_environ")
-    def test_steam_game_id_in_environ(self, mock_environ) -> None:
-        mock_environ.return_value = {"SteamGameId": "123456"}
-        self.assertEqual(steam_appid_for_window("SomeNativeGame", 300), "123456")
+    def test_steam_game_id_in_environ(self) -> None:
+        with patch(
+            "theater_mode.steam.read_process_environ", return_value={"SteamGameId": "67890"}
+        ):
+            self.assertEqual(steam_appid_for_window("SomeGame", 200), "67890")
 
-        mock_environ.return_value = {"SteamAppId": "654321"}
-        self.assertEqual(steam_appid_for_window("AnotherGame", 301), "654321")
+    def test_steam_appid_in_environ(self) -> None:
+        with patch("theater_mode.steam.read_process_environ", return_value={"SteamAppId": "54321"}):
+            self.assertEqual(steam_appid_for_window("SomeGame", 250), "54321")
 
-    @patch("theater_mode.steam.read_process_environ")
-    @patch("theater_mode.steam.read_process_cmdline")
-    def test_gamescope_appid_in_cmdline(self, mock_cmdline, mock_environ) -> None:
-        mock_environ.return_value = {}
-        mock_cmdline.return_value = (
-            "gamescope -w 1920 -h 1080 -- reaper SteamLaunch AppId=1145360 -- proton run"
-        )
-        self.assertEqual(steam_appid_for_window("gamescope", 400), "1145360")
+    def test_gamescope_appid_in_cmdline(self) -> None:
+        with (
+            patch("theater_mode.steam.read_process_environ", return_value={}),
+            patch(
+                "theater_mode.steam.read_process_cmdline",
+                return_value="gamescope --steam -e -- AppId=11111 /path/to/game",
+            ),
+        ):
+            self.assertEqual(steam_appid_for_window("gamescope", 300), "11111")
+
+    def test_ignored_classes(self) -> None:
+        for ignored in (
+            "plasmashell",
+            "steamwebhelper",
+            "steam",
+            "xwaylandvideobridge",
+            "org.kde.plasmashell",
+        ):
+            self.assertIn(ignored, IGNORED_CLASSES)
+            self.assertIsNone(steam_appid_for_window(ignored, 400))
 
     def test_unidentified_window(self) -> None:
         with (
@@ -63,6 +60,19 @@ class TestSteamDetection(unittest.TestCase):
             patch("theater_mode.steam.read_process_cmdline", return_value=""),
         ):
             self.assertIsNone(steam_appid_for_window("firefox", 500))
+
+    def test_invalid_environ_or_cmdline_values(self) -> None:
+        with patch(
+            "theater_mode.steam.read_process_environ", return_value={"SteamGameId": "not_a_number"}
+        ):
+            self.assertIsNone(steam_appid_for_window("SomeGame", 600))
+        with (
+            patch("theater_mode.steam.read_process_environ", return_value={}),
+            patch(
+                "theater_mode.steam.read_process_cmdline", return_value="gamescope -- AppId=invalid"
+            ),
+        ):
+            self.assertIsNone(steam_appid_for_window("gamescope", 700))
 
 
 class TestArtwork(unittest.TestCase):
@@ -98,147 +108,108 @@ class TestArtwork(unittest.TestCase):
             with patch("theater_mode.steam.STEAM_LIBRARY_CACHES", (native, flatpak)):
                 self.assertEqual(find_hero_art("12345"), art)
 
-    @needs_pillow
-    def test_fast_feather_mask_gradient(self) -> None:
-        width = 100
-        fg_height = 80
-        feather = 20
-
-        mask = _fast_feather_mask(width, fg_height, feather)
-        self.assertEqual(mask.size, (width, fg_height))
-        self.assertEqual(mask.mode, "L")
-
-        # Top should fade from 0 upwards
-        self.assertEqual(mask.getpixel((0, 0)), 0)
-        self.assertEqual(mask.getpixel((width - 1, 0)), 0)
-
-        # Middle should be fully opaque (255)
-        self.assertEqual(mask.getpixel((width // 2, fg_height // 2)), 255)
-
-        # Bottom should fade down to ~0
-        self.assertLessEqual(mask.getpixel((0, fg_height - 1)), 15)
-
-        horizontal = _fast_feather_mask(width, fg_height, feather, horizontal=True)
-        self.assertEqual(horizontal.getpixel((0, fg_height // 2)), 0)
-        self.assertEqual(horizontal.getpixel((width // 2, fg_height // 2)), 255)
-        self.assertEqual(horizontal.getpixel((width - 1, fg_height // 2)), 0)
+    def test_find_art_binary_honours_its_env_override(self) -> None:
+        """Resolution order is find_helper_binary's; this pins the name asked of it."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            fake_bin = Path(tmp_dir) / "theater-art"
+            fake_bin.touch(mode=0o755)
+            with patch.dict("os.environ", {"THEATER_ART_BIN": str(fake_bin)}):
+                self.assertEqual(find_art_binary(), fake_bin)
 
     def test_build_artwork_missing_source_returns_none(self) -> None:
         with patch("theater_mode.steam.find_hero_art", return_value=None):
             result = build_artwork("99999", 1920, 1080, 0.4)
             self.assertIsNone(result)
 
-    def test_build_artwork_without_pillow_degrades_instead_of_raising(self) -> None:
+    def test_build_artwork_missing_binary_returns_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
-            hero = Path(tmp_dir) / "hero.png"
-            hero.write_bytes(b"not really an image")
+            hero = Path(tmp_dir) / "library_hero.jpg"
+            hero.write_bytes(b"jpeg data")
             with (
-                patch.dict(sys.modules, {"PIL": None}),
                 patch("theater_mode.steam.find_hero_art", return_value=hero),
+                patch("theater_mode.steam.find_art_binary", return_value=None),
                 patch("theater_mode.steam.ART_CACHE", Path(tmp_dir) / "cache"),
+                self.assertLogs("theater-moded", level="WARNING"),
+            ):
+                self.assertIsNone(build_artwork("12345", 320, 240, 0.4))
+
+    def test_build_artwork_subprocess_failure_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hero = Path(tmp_dir) / "library_hero.jpg"
+            hero.write_bytes(b"jpeg data")
+            fake_bin = Path(tmp_dir) / "theater-art"
+            fake_bin.touch(mode=0o755)
+
+            with (
+                patch("theater_mode.steam.find_hero_art", return_value=hero),
+                patch("theater_mode.steam.find_art_binary", return_value=fake_bin),
+                patch("theater_mode.steam.ART_CACHE", Path(tmp_dir) / "cache"),
+                patch("subprocess.run", return_value=SimpleNamespace(returncode=1, stderr="error")),
                 self.assertLogs("theater-moded", level="ERROR"),
             ):
                 self.assertIsNone(build_artwork("12345", 320, 240, 0.4))
 
-    @needs_pillow
-    def test_build_artwork_generates_and_caches_argb(self) -> None:
-        from PIL import Image
+    def test_build_artwork_subprocess_timeout_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hero = Path(tmp_dir) / "library_hero.jpg"
+            hero.write_bytes(b"jpeg data")
+            fake_bin = Path(tmp_dir) / "theater-art"
+            fake_bin.touch(mode=0o755)
 
+            with (
+                patch("theater_mode.steam.find_hero_art", return_value=hero),
+                patch("theater_mode.steam.find_art_binary", return_value=fake_bin),
+                patch("theater_mode.steam.ART_CACHE", Path(tmp_dir) / "cache"),
+                patch(
+                    "subprocess.run",
+                    side_effect=subprocess.TimeoutExpired(cmd="theater-art", timeout=3.0),
+                ),
+                self.assertLogs("theater-moded", level="ERROR"),
+            ):
+                self.assertIsNone(build_artwork("12345", 320, 240, 0.4))
+
+    def test_build_artwork_generates_and_caches_argb(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
             cache_dir = tmp_path / "cache"
-            hero_file = tmp_path / "hero.jpg"
-            expected_target = cache_dir / "12345-v2-320x240-d0400.argb"
+            hero_file = tmp_path / "library_hero.jpg"
+            hero_file.write_bytes(b"jpeg data")
+            expected_target = cache_dir / "12345-v3-320x240-d0400.argb"
+            fake_bin = tmp_path / "theater-art"
+            fake_bin.touch(mode=0o755)
 
-            # Create a sample hero image
-            img = Image.new("RGB", (1920, 620), color=(120, 140, 160))
-            img.save(hero_file, quality=90)
-            cache_dir.mkdir()
-            expected_target.with_suffix(".tmp").write_bytes(b"interrupted write")
+            def fake_run(cmd, **kwargs):
+                out_path = Path(cmd[2])
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                out_path.write_bytes(b"\x00" * (320 * 240 * 4))
+                return SimpleNamespace(returncode=0, stderr="")
 
             with (
                 patch("theater_mode.steam.find_hero_art", return_value=hero_file),
+                patch("theater_mode.steam.find_art_binary", return_value=fake_bin),
                 patch("theater_mode.steam.ART_CACHE", cache_dir),
+                patch("subprocess.run", side_effect=fake_run) as mock_run,
             ):
                 target = build_artwork("12345", 320, 240, 0.4)
                 self.assertIsNotNone(target)
                 self.assertTrue(target.exists())
                 self.assertEqual(target, expected_target)
-                self.assertFalse(target.with_suffix(".tmp").exists())
+                self.assertEqual(mock_run.call_count, 1)
 
-                # Verify ARGB file size (320 * 240 * 4 bytes)
-                expected_size = 320 * 240 * 4
-                self.assertEqual(target.stat().st_size, expected_size)
+                # Verify command invocation contract (including integer dim_millis)
+                cmd = mock_run.call_args.args[0]
+                self.assertEqual(cmd[0], str(fake_bin))
+                self.assertEqual(cmd[1], str(hero_file))
+                self.assertEqual(cmd[2], str(expected_target))
+                self.assertEqual(cmd[3], "320")
+                self.assertEqual(cmd[4], "240")
+                self.assertEqual(cmd[5], "400")
+                self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 3.0)
 
-                # Calling build_artwork again should return cached path without rewriting
-                mtime_before = target.stat().st_mtime_ns
+                # Calling build_artwork again should return cached path without re-running subprocess
                 cached_target = build_artwork("12345", 320, 240, 0.4)
                 self.assertEqual(cached_target, target)
-                self.assertEqual(target.stat().st_mtime_ns, mtime_before)
-
-    @needs_pillow
-    def test_build_artwork_crops_center_and_writes_bgra_pixels(self) -> None:
-        from PIL import Image
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            cache_dir = tmp_path / "cache"
-            hero_file = tmp_path / "hero.png"
-
-            hero = Image.new("RGB", (80, 20), "green")
-            hero.paste("red", (0, 0, 20, 20))
-            hero.paste("blue", (60, 0, 80, 20))
-            hero.save(hero_file)
-
-            with (
-                patch("theater_mode.steam.find_hero_art", return_value=hero_file),
-                patch("theater_mode.steam.ART_CACHE", cache_dir),
-            ):
-                target = build_artwork("12345", 40, 40, 0.0)
-
-            self.assertIsNotNone(target)
-            rendered = Image.frombytes("RGBA", (40, 40), target.read_bytes(), "raw", "BGRA")
-
-            # The square backdrop samples the green center of the wide source.
-            backdrop_pixel = rendered.getpixel((20, 2))
-            self.assertGreater(backdrop_pixel[1], backdrop_pixel[0])
-            self.assertGreater(backdrop_pixel[1], backdrop_pixel[2])
-
-            # The foreground retains the complete hero and is centered vertically.
-            self.assertGreater(rendered.getpixel((2, 20))[0], 150)
-            self.assertGreater(rendered.getpixel((37, 20))[2], 150)
-            self.assertEqual(rendered.getpixel((20, 20))[3], 255)
-
-    @needs_pillow
-    def test_build_artwork_contains_portrait_art_and_feathers_its_sides(self) -> None:
-        from PIL import Image
-
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp_path = Path(tmp_dir)
-            cache_dir = tmp_path / "cache"
-            art_file = tmp_path / "box.png"
-
-            art = Image.new("RGB", (20, 40), "green")
-            art.paste("red", (0, 0, 20, 10))
-            art.paste("blue", (0, 30, 20, 40))
-            art.save(art_file)
-
-            with (
-                patch("theater_mode.steam.find_hero_art", return_value=art_file),
-                patch("theater_mode.steam.ART_CACHE", cache_dir),
-            ):
-                target = build_artwork("12345", 40, 20, 0.0)
-
-            self.assertIsNotNone(target)
-            rendered = Image.frombytes("RGBA", (40, 20), target.read_bytes(), "raw", "BGRA")
-
-            # Portrait art fits the display height, stays centered, and retains both ends.
-            self.assertGreater(rendered.getpixel((20, 2))[0], 150)
-            self.assertGreater(rendered.getpixel((20, 17))[2], 150)
-            # Outside the portrait foreground, the green ambient backdrop remains visible.
-            side = rendered.getpixel((2, 10))
-            self.assertGreater(side[1], side[0])
-            self.assertGreater(side[1], side[2])
+                self.assertEqual(mock_run.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwayland-dev pkg-config python3-gi python3-pil shellcheck
+            libwayland-dev pkg-config python3-gi python3-yaml shellcheck
 
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -51,7 +51,7 @@ jobs:
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
               HOME="$fake" XDG_BIN_HOME="$bin" ./install.sh --no-service
 
-          for file in "$bin/theater-mode" "$bin/theater-moded" "$bin/theater-dimmer" \
+          for file in "$bin/theater-mode" "$bin/theater-moded" "$bin/theater-dimmer" "$bin/theater-art" \
                       "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
                       "$fake/.local/share/theater-mode/config.reference.toml" \
                       "$fake/.local/share/kwin/scripts/theater-detect/metadata.json" \
@@ -66,6 +66,8 @@ jobs:
 
           [ ! -e "$fake/.local/share/theater-mode/lib/theater_mode/dimmer" ] \
             || fail "dimmer sources leaked into the install"
+          [ ! -e "$fake/.local/share/theater-mode/lib/theater_mode/art" ] \
+            || fail "art sources leaked into the install"
           [ -z "$(find "$fake/.local/share/theater-mode/lib" -name __pycache__ -print -quit)" ] \
             || fail "bytecode leaked into the install"
 
@@ -88,13 +90,14 @@ jobs:
           out="$RUNNER_TEMP/dist"
           fake="$RUNNER_TEMP/release-home"
           ./bin/make-release \
-            --dimmer-bin src/theater_mode/dimmer/theater-dimmer --outdir "$out"
+            --dimmer-bin src/theater_mode/dimmer/theater-dimmer --art-bin src/theater_mode/art/theater-art --outdir "$out"
           tar xzf "$out"/*.tar.gz -C "$RUNNER_TEMP"
           root=$(find "$RUNNER_TEMP" -maxdepth 1 -type d -name 'theater-mode-v*' -print -quit)
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
             HOME="$fake" "$root/install.sh" --no-service
           test -f "$fake/.local/share/theater-mode/lib/theater_mode/update.py"
           "$fake/.local/bin/theater-dimmer" --version
+          "$fake/.local/bin/theater-art" --version
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
             HOME="$fake" "$fake/.local/share/theater-mode/install.sh" \
               --uninstall --no-service --yes
@@ -123,9 +126,11 @@ jobs:
 
           run "$fake/.local/bin/theater-dimmer" --version >/dev/null \
             || fail "upgrade left an unusable theater-dimmer"
+          run "$fake/.local/bin/theater-art" --version >/dev/null \
+            || fail "upgrade left an unusable theater-art"
           grep -q '^stale$' "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
             && fail "upgrade did not replace the installed package"
-          for file in "$fake/.local/bin/theater-mode" "$fake/.local/bin/theater-moded" \
+          for file in "$fake/.local/bin/theater-mode" "$fake/.local/bin/theater-moded" "$fake/.local/bin/theater-art" \
                       "$fake/.local/share/theater-mode/install.sh" \
                       "$fake/.config/systemd/user/theater-mode.service"; do
             [ -e "$file" ] || fail "upgrade lost $file"
@@ -136,7 +141,7 @@ jobs:
           [ "$(find "$fake" \( -type f -o -type l \) | wc -l)" -eq 0 ] \
             || fail "uninstall after upgrade left files behind"
 
-      - name: Test --build and --dimmer-bin selection
+      - name: Test helper build and override selection
         run: |
           set -euo pipefail
           fail() { echo "::error::$*"; exit 1; }
@@ -150,15 +155,33 @@ jobs:
           built="$RUNNER_TEMP/build-home"
           run "$built" "$root/install.sh" --no-service --build
           run "$built" "$built/.local/bin/theater-dimmer" --version >/dev/null \
-            || fail "--build produced an unusable helper"
+            || fail "--build produced an unusable dimmer helper"
+          run "$built" "$built/.local/bin/theater-art" --version >/dev/null \
+            || fail "--build produced an unusable art helper"
 
-          # --dimmer-bin must install exactly the file it is given.
+          # Each helper resolves independently: a missing art prebuilt must not force
+          # an explicitly supplied dimmer to be rebuilt.
+          partial="$RUNNER_TEMP/art-build-release"
+          cp -a "$root" "$partial"
+          rm -f "$partial/bin/theater-art"
+          rm -rf "$partial/src/theater_mode/dimmer"
+          art_built="$RUNNER_TEMP/art-build-home"
+          run "$art_built" "$partial/install.sh" --no-service \
+            --dimmer-bin "$root/bin/theater-dimmer"
+          run "$art_built" "$art_built/.local/bin/theater-art" --version >/dev/null \
+            || fail "art-only build produced an unusable helper"
+
+          # --dimmer-bin and --art-bin must install exactly the file they are given.
           given="$RUNNER_TEMP/given-home"
           run "$given" "$root/install.sh" --no-service \
-            --dimmer-bin src/theater_mode/dimmer/theater-dimmer
+            --dimmer-bin src/theater_mode/dimmer/theater-dimmer \
+            --art-bin src/theater_mode/art/theater-art
           cmp -s src/theater_mode/dimmer/theater-dimmer \
                  "$given/.local/bin/theater-dimmer" \
             || fail "--dimmer-bin did not install the helper it was given"
+          cmp -s src/theater_mode/art/theater-art \
+                 "$given/.local/bin/theater-art" \
+            || fail "--art-bin did not install the helper it was given"
 
           # A helper that cannot execute must be refused before anything is installed.
           bad="$RUNNER_TEMP/bad-helper"
@@ -166,7 +189,11 @@ jobs:
           chmod +x "$bad"
           if run "$RUNNER_TEMP/bad-home" "$root/install.sh" --no-service \
                --dimmer-bin "$bad" 2>/dev/null; then
-            fail "installer accepted a helper that cannot run"
+            fail "installer accepted a dimmer helper that cannot run"
+          fi
+          if run "$RUNNER_TEMP/bad-art-home" "$root/install.sh" --no-service \
+               --art-bin "$bad" 2>/dev/null; then
+            fail "installer accepted an art helper that cannot run"
           fi
 
       - name: Repository remains clean
@@ -185,5 +212,4 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python }}
-      - run: python -m pip install Pillow
       - run: python -m unittest discover -s tests -t . -v
