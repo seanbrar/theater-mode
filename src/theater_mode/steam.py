@@ -12,7 +12,7 @@ from theater_mode.constants import (
     IGNORED_CLASSES,
     STEAM_APP_CLASS,
     STEAM_LAUNCH_ARG,
-    STEAM_LIBRARY_CACHE,
+    STEAM_LIBRARY_CACHES,
 )
 from theater_mode.utils import read_process_cmdline, read_process_environ
 
@@ -59,12 +59,14 @@ def find_hero_art(appid: str) -> Path | None:
     Note: Local artwork is available for games whose store or library page has been
     viewed in the Steam client. Returns None if artwork is unavailable.
     """
-    library_cache = get_dev_config().force_art_dir or STEAM_LIBRARY_CACHE
-    app_cache_dir = library_cache / appid
-    if not app_cache_dir.is_dir():
-        return None
-
-    candidates = list(app_cache_dir.rglob("library_hero.jpg"))
+    override = get_dev_config().force_art_dir
+    library_caches = (override,) if override is not None else STEAM_LIBRARY_CACHES
+    candidates = [
+        candidate
+        for library_cache in library_caches
+        if (app_cache_dir := library_cache / appid).is_dir()
+        for candidate in app_cache_dir.rglob("library_hero.jpg")
+    ]
     if not candidates:
         return None
 

@@ -81,10 +81,22 @@ class TestArtwork(unittest.TestCase):
             art1 = app_dir / "library_hero.jpg"
             art1.write_bytes(b"x" * 100)
 
-            with patch("theater_mode.steam.STEAM_LIBRARY_CACHE", base):
+            with patch("theater_mode.steam.STEAM_LIBRARY_CACHES", (base,)):
                 found = find_hero_art("12345")
                 self.assertIsNotNone(found)
                 self.assertEqual(found, art1)
+
+    def test_find_hero_art_checks_native_and_flatpak_caches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            base = Path(tmp_dir)
+            native = base / "native"
+            flatpak = base / "flatpak"
+            art = flatpak / "12345" / "hash" / "library_hero.jpg"
+            art.parent.mkdir(parents=True)
+            art.write_bytes(b"flatpak art")
+
+            with patch("theater_mode.steam.STEAM_LIBRARY_CACHES", (native, flatpak)):
+                self.assertEqual(find_hero_art("12345"), art)
 
     @needs_pillow
     def test_fast_feather_mask_gradient(self) -> None:

@@ -24,6 +24,32 @@ APP_DATA = _xdg_dir("XDG_DATA_HOME", ".local/share") / "theater-mode"
 STEAM_LIBRARY_CACHE = (
     _xdg_dir("XDG_DATA_HOME", ".local/share") / "Steam" / "appcache" / "librarycache"
 )
+FLATPAK_STEAM_LIBRARY_CACHE = (
+    Path.home()
+    / ".var"
+    / "app"
+    / "com.valvesoftware.Steam"
+    / "data"
+    / "Steam"
+    / "appcache"
+    / "librarycache"
+)
+FLATPAK_STEAM_XDG_LIBRARY_CACHE = (
+    Path.home()
+    / ".var"
+    / "app"
+    / "com.valvesoftware.Steam"
+    / ".local"
+    / "share"
+    / "Steam"
+    / "appcache"
+    / "librarycache"
+)
+STEAM_LIBRARY_CACHES = (
+    STEAM_LIBRARY_CACHE,
+    FLATPAK_STEAM_LIBRARY_CACHE,
+    FLATPAK_STEAM_XDG_LIBRARY_CACHE,
+)
 ART_CACHE = _xdg_dir("XDG_CACHE_HOME", ".cache") / "theater-mode"
 
 # Wayland Dimmer

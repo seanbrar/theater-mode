@@ -157,8 +157,8 @@ resolve_dimmer() {
         DIMMER_SOURCE="$BUILT_DIMMER"
         NEEDS_BUILD=1
     elif [ -n "$DIMMER_OVERRIDE" ]; then
-        [ -e "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: no such file: $DIMMER_OVERRIDE"
-        [ -x "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: not executable: $DIMMER_OVERRIDE"
+        [ -e "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: file not found: $DIMMER_OVERRIDE"
+        [ -x "$DIMMER_OVERRIDE" ] || die "--dimmer-bin: binary is not executable: $DIMMER_OVERRIDE (try: chmod +x '$DIMMER_OVERRIDE')"
         DIMMER_SOURCE="$DIMMER_OVERRIDE"
         NEEDS_BUILD=0
     elif [ -f "$PREBUILT_DIMMER" ]; then
@@ -199,7 +199,7 @@ verify_dimmer() {
                 printf '  libwayland-client.so.0 is missing. Install your distribution wayland runtime.\n' >&2
                 ;;
         esac
-        die "refusing to install a helper that cannot execute"
+        exit 1
     fi
     info "$out ($DIMMER_SOURCE)"
 }
@@ -235,7 +235,8 @@ check_prerequisites() {
     if [ ${#missing[@]} -gt 0 ]; then
         printf '\033[31merror:\033[0m missing prerequisites:\n' >&2
         printf '  - %s\n' "${missing[@]}" >&2
-        die "please install missing dependencies"
+        printf "\n  Please install the missing dependencies with your package manager.\n" >&2
+        exit 1
     fi
 
     # Check if target bin directory is in user PATH
@@ -245,8 +246,50 @@ check_prerequisites() {
 
     # Pillow is optional; without it, secondary screens dim to plain black without artwork
     if command -v python3 >/dev/null && ! python3 -c 'import PIL' 2>/dev/null; then
-        warn "python3-pillow is not installed. Game artwork cannot be generated,"
-        warn "         so secondary displays will dim to plain black."
+        warn "Pillow is not available, so game artwork cannot be generated."
+        warn "         Theater-mode will still work and dim displays to plain black."
+    fi
+}
+
+check_desktop_session() {
+    local desktop major minor plasma_output session
+    # Staged installs are intentionally usable in CI and build containers. Updates preserve
+    # an existing installation and may be run over SSH, where desktop variables are absent.
+    [ "$SERVICE" -eq 1 ] || return 0
+
+    desktop="${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}"
+    session="${XDG_SESSION_TYPE:-}"
+    desktop="${desktop,,}"
+    session="${session,,}"
+
+    case "$desktop" in
+        *gamescope*)
+            die "Game Mode is not supported; install from a KDE Plasma desktop session"
+            ;;
+        *kde*|*plasma*) ;;
+        "")
+            die "no desktop session detected; install from a terminal inside KDE Plasma"
+            ;;
+        *)
+            die "KDE Plasma is required (detected desktop: ${XDG_CURRENT_DESKTOP:-$DESKTOP_SESSION})"
+            ;;
+    esac
+
+    [ "$session" = "wayland" ] \
+        || die "a KDE Plasma Wayland session is required (detected: ${session:-unknown})"
+
+    command -v plasmashell >/dev/null 2>&1 \
+        || die "plasmashell was not found; KDE Plasma 6.2 or newer is required"
+    plasma_output=$(plasmashell --version 2>&1) \
+        || die "could not determine the KDE Plasma version"
+    if [[ "$plasma_output" =~ ([0-9]+)\.([0-9]+) ]]; then
+        major=${BASH_REMATCH[1]}
+        minor=${BASH_REMATCH[2]}
+    else
+        die "could not determine the KDE Plasma version from: $plasma_output"
+    fi
+    if [ "$major" -lt 6 ] || { [ "$major" -eq 6 ] && [ "$minor" -lt 2 ]; }; then
+        die "KDE Plasma 6.2 or newer is required (detected: $plasma_output)"
     fi
 }
 
@@ -263,6 +306,7 @@ do_install() {
     fi
 
     resolve_dimmer
+    check_desktop_session
     check_prerequisites
 
     if [ "$NEEDS_BUILD" -eq 1 ]; then
@@ -334,10 +378,10 @@ EOF
         return 0
     fi
 
-    systemctl --user daemon-reload || die "systemctl daemon-reload failed"
+    systemctl --user daemon-reload || die "systemctl --user daemon-reload failed"
     systemctl --user enable theater-mode.service >/dev/null 2>&1 \
-        || die "could not enable theater-mode.service"
-    systemctl --user restart theater-mode.service || die "could not start theater-mode.service"
+        || die "could not enable theater-mode.service via systemctl --user"
+    systemctl --user restart theater-mode.service || die "could not start theater-mode.service via systemctl --user"
 
     if activate_kwin_script; then
         cat <<EOF
@@ -442,11 +486,11 @@ while [ $# -gt 0 ]; do
         -b|--build)      FORCE_BUILD=1 ;;
         --dimmer-bin=*)  DIMMER_OVERRIDE="${1#*=}" ;;
         --dimmer-bin)
-            [ $# -ge 2 ] || die "--dimmer-bin requires a path"
+            [ $# -ge 2 ] || die "--dimmer-bin requires a file path argument"
             DIMMER_OVERRIDE="$2"; shift ;;
         -y|--yes|-f|--force) FORCE=1 ;;
         -h|--help)       show_help; exit 0 ;;
-        *)               die "unknown option: $1 (try --help)" ;;
+        *)               die "unknown option '$1' (run with --help to see available options)" ;;
     esac
     shift
 done

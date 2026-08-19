@@ -1,271 +1,213 @@
 # theater-mode
 
-Dims inactive monitors and displays the active Steam game's library artwork on them, restoring displays when the game exits.
+When you launch a Steam game, theater-mode dims your other monitors and fills them with
+the game's Steam artwork. Move the game to another monitor and the effect follows it.
+Close the game and everything returns to normal.
 
-A lightweight KWin script reports window lifecycle events via D-Bus to a background daemon (`theater-moded`), which controls a native Wayland layer-shell helper (`theater-dimmer`) to smoothly fade and overlay secondary displays.
+## Will it work on my system?
 
-Built for KDE Plasma 6.2+ on Wayland.
+You need all of these:
 
-## Installation
+- two or more monitors;
+- KDE Plasma 6.2 or newer;
+- a Wayland desktop session; and
+- games launched through Steam.
+
+On Bazzite, use the **KDE edition in Desktop Mode**. The GNOME edition and Game Mode are
+not supported. On SteamOS, switch to **Desktop Mode**; SteamOS versions before 3.8 use an
+older desktop setup that is not supported.
+
+The installer checks your desktop and stops with an explanation if it is not compatible.
+
+## Install
+
+Open Konsole, paste this command, and press Enter:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seanbrar/theater-mode/main/get.sh | bash
 ```
 
-That downloads the latest release, checks it against the published checksum, installs into `$HOME`, and starts the daemon. There is no second step: the KWin script is enabled for you and cinematic dimming is active with built-in defaults.
+The installer downloads the latest release, verifies the download, and starts
+theater-mode. It installs only for your user account and does not need `sudo` or change
+the operating system.
 
-The published x86_64 build needs no root, compiler, or package layering, so it installs the same way on ordinary distributions and on atomic ones like Bazzite, Fedora Silverblue, and SteamOS. Other architectures currently use the source installation below.
+Now launch a Steam game. The other monitors should fade after its window appears.
 
-On SteamOS this means desktop mode, and only from 3.8 onward, where the Plasma session defaults to Wayland. Earlier releases default to X11, where the overlay cannot run.
+The ready-made download is currently for x86_64 systems, including ordinary desktop PCs,
+Steam Deck, and most Bazzite devices. See [Installing from source](#installing-from-source)
+for other processors.
 
-Prefer not to pipe a script into a shell? Download the tarball from [Releases](https://github.com/seanbrar/theater-mode/releases), then:
+<details>
+<summary>Install without piping a script into Bash</summary>
+
+Download the archive and checksum from [GitHub Releases](https://github.com/seanbrar/theater-mode/releases), verify the download against its checksum, then extract and install it:
 
 ```sh
+sha256sum -c theater-mode-v*-linux-x86_64.tar.gz.sha256
 tar xzf theater-mode-v*-linux-x86_64.tar.gz
 cd theater-mode-v*-linux-x86_64
 ./install.sh
 ```
 
-### Updating and removing
+</details>
+
+## Update or remove it
+
+Update to the newest release:
 
 ```sh
-theater-mode update           # Upgrade to the latest release
-theater-mode update --check   # Only report whether one is available
-theater-mode uninstall        # Remove it, keeping your settings
+theater-mode update
 ```
 
-Your configuration, service drop-ins, and artwork cache survive both. Uninstalling lists what it keeps before it removes anything.
-Updating also preserves whether the service and KWin integration are currently active.
-
-### Installing from source
-
-A source install compiles the `theater-dimmer` helper, so it additionally needs a C compiler, `make`, `pkg-config`, and the libwayland development headers.
+Remove theater-mode:
 
 ```sh
-git clone https://github.com/seanbrar/theater-mode
-cd theater-mode
-./install.sh           # Build the helper and install
+theater-mode uninstall
 ```
 
-### Requirements
+Both commands keep your settings. Uninstalling shows exactly what it will remove and asks
+before doing it.
 
-Python 3.12+, PyGObject, and a KDE Plasma **6.2 or newer** Wayland session. Pillow is optional; without it secondary displays dim to plain black instead of showing game artwork.
+## Change the appearance
 
-The 6.2 floor is not cosmetic: the dimmer draws through the `wp_alpha_modifier_v1` Wayland protocol, which KWin first implemented in Plasma 6.2. On 6.0 and 6.1 the daemon starts but the overlay helper exits reporting the missing protocol.
-
-If the KDE configuration tools are unavailable, the installer says so and asks you to enable **Theater Mode Detector** once under **System Settings → Window Management → KWin Scripts**. Otherwise this is handled for you.
-
-Check that it is working with:
+The built-in settings are ready to use. These are the most common changes:
 
 ```sh
-theater-mode status
-```
-
-## Configuration
-
-`theater-mode` uses a structured 3-layer TOML configuration model resolved at runtime:
-
-1. **Built-in Defaults** (in code, sufficient to run out of the box)
-2. **System Configuration** (`/etc/xdg/theater-mode/config.toml`)
-3. **User Configuration** (`~/.config/theater-mode/config.toml`)
-
-### Managing Configuration via CLI
-
-Use the `theater-mode` command-line tool to inspect or modify configuration live over D-Bus:
-
-```sh
-# View resolved configuration with per-key provenance and origin layers
-theater-mode config show
-
-# Check configuration warnings or malformed key diagnostics
-theater-mode config diagnostics
-
-# Read a single resolved value
-theater-mode config get effect.dim_factor
-
-# Preview a setting in-session without saving to disk
-theater-mode config preview effect.dim_factor 0.50
-
-# Revert in-session preview
-theater-mode config revert-preview
-
-# Permanently commit a setting to ~/.config/theater-mode/config.toml
+# Make the other monitors a little brighter. 0 is unchanged; 1 is completely black.
 theater-mode config set effect.dim_factor 0.75
 
-# Reload configuration from disk
-theater-mode config reload
+# Keep windows on the other monitors visible, with artwork behind them.
+# Pair this with a lower dim_factor (such as 0.35) so the wallpaper stays bright and clear.
+theater-mode config set effect.placement behind_windows
+theater-mode config set effect.dim_factor 0.35
 
-# List connected displays and the config sections that address each one
+# Use a plain dark screen instead of Steam artwork.
+theater-mode config set effect.art false
+
+# Wait until the game enters fullscreen before activating.
+theater-mode config set daemon.require_fullscreen true
+```
+
+Changes take effect immediately. To see every current setting, run:
+
+```sh
+theater-mode config show
+```
+
+The [reference configuration](config.reference.toml) lists every available setting and
+its allowed values.
+
+<details>
+<summary>Use different settings on different monitors</summary>
+
+First, ask theater-mode how it identifies your monitors:
+
+```sh
 theater-mode outputs
 ```
 
-Values are validated against the schema before they are written, so an unknown key or an
-out-of-range value is refused rather than persisted. Everything applies live except
-`effect.mode`, which selects the effect implementation at startup and needs
-`systemctl --user restart theater-mode.service`.
-
-### Configuration File Format
-
-See [`config.reference.toml`](config.reference.toml) for the complete reference configuration generated directly from the schema.
+Open `~/.config/theater-mode/config.toml` and copy the suggested heading for the monitor
+you want to change. Add settings below it, for example:
 
 ```toml
-[effect]
-# Display effect: 'dim' (cinematic overlay) or 'log' (dry run)
-mode = "dim"
-
-# Where the effect sits: 'over_windows' or 'behind_windows' (see "Placement" below)
-placement = "over_windows"
-
-# Fraction of brightness to reduce (0.0 = no dimming, 1.0 = solid black)
-dim_factor = 0.85
-
-# Show Steam library artwork on secondary displays
-art = true
-
-[transition]
-# Transition fade duration in seconds
-duration = 2.0
-
-# Easing curve: 'sine', 'quad', 'cubic', or 'linear'
-curve = "sine"
-
-[daemon]
-# Grace period in seconds before restoring displays after game exits
-revert_delay = 3.0
-
-# Stability delay in seconds before following game to a new display
-stage_delay = 1.5
-
-# Require game window to enter fullscreen before activating
-require_fullscreen = false
-
-# Per-output overrides -- see "Addressing Displays" below
 [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
 dim_factor = 0.50
 placement = "behind_windows"
 art = false
 ```
 
-### Placement
+The manufacturer, model, and serial number let the setting follow the physical monitor
+if you move its cable to another port. If a monitor does not provide that information,
+use the suggested connector heading such as `[outputs.DP-2]` instead.
 
-`placement` decides whether the effect sits above or below your open windows:
+Per-monitor settings can change `placement`, `dim_factor`, `art`, `duration`, and `curve`.
 
-| Value | Behavior |
-| --- | --- |
-| `over_windows` | Covers everything on the display, blocking its light. Windows on that screen are hidden until the game exits. |
-| `behind_windows` | Paints on the desktop behind your windows, which stay visible and usable. Empty screen area shows the artwork. |
+</details>
 
-`over_windows` is the default because blocking light is the point of theater mode. Choose
-`behind_windows` for a monitor you still want to read while playing — a chat window or a
-guide stays fully interactive, and the artwork fills whatever the windows don't cover.
+## If something goes wrong
 
-The two interact with `dim_factor`. Over windows, `dim_factor` removes light from the whole
-display. Behind windows it only darkens the artwork itself, so the default `0.85` produces a
-very dark wallpaper; something nearer `0.3` usually reads better there.
+**Nothing happens when a game starts**
 
-### Addressing Displays
+Run `theater-mode status`. If it cannot connect, restart the service with:
 
-Only `placement`, `dim_factor`, `art`, `duration`, and `curve` can be set per output;
-`effect.mode` and the `[daemon]` keys are global.
-
-An output's identity is read from its EDID over DRM sysfs, so displays can be addressed by
-what they *are* rather than by which port they happen to occupy. Sections are matched in
-this order, and the first one that exists wins:
-
-| Priority | Section | Selects |
-| --- | --- | --- |
-| 1 | `[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]` | one specific panel, even among identical models |
-| 2 | `[outputs."Dell Inc.:DELL S2721QS"]` | every panel of that model, stable across port swaps |
-| 3 | `[outputs.DP-2]` | whatever is plugged into that connector |
-
-Run `theater-mode outputs` to print the exact section headers for your hardware:
-
-```
- DP-2
-   Dell Inc. DELL S2721QS
-   serial: 4QCPZY3
-   config sections, most specific first:
-     [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
-     [outputs."DEL:DELL S2721QS:4QCPZY3"]
-     [outputs."Dell Inc.:DELL S2721QS"]
-     [outputs."DEL:DELL S2721QS"]
-     [outputs.DP-2]
-```
-
-The full vendor name (`Dell Inc.`) comes from the system PnP ID table at
-`/usr/share/hwdata/pnp.ids`; the raw three-letter EDID code (`DEL`) is always accepted as
-an equivalent, so a config file stays valid on hosts without that table. Displays that
-report no usable EDID -- virtual outputs, some KVM switches, sleeping panels -- are still
-fully supported and are addressed by connector name.
-
-## Status & Monitoring
-
-Check daemon status:
 ```sh
-theater-mode status
+systemctl --user restart theater-mode.service
 ```
 
-Follow daemon logs:
+Also open **System Settings → Window Management → KWin Scripts** and make sure
+**Theater Mode Detector** is enabled.
+
+**A monitor stays dim after the game closes**
+
+Restore every monitor immediately:
+
 ```sh
-journalctl --user -u theater-mode.service -f
-```
-
-### Testing & Simulation
-
-Test effects without launching a game:
-```sh
-# Simulate a game launch (AppID 1671210 on display DP-1)
-theater-mode simulate "1671210" "DP-1"
-
-# Clear simulation and restore displays
 theater-mode clear
 ```
 
-`clear` resets window tracking and immediately restores all displays.
+**The monitors dim, but there is no artwork**
 
-## Game Detection
+Theater-mode uses artwork already downloaded by Steam. Open the game in your Steam
+library once and try again. Native and Flatpak Steam are both detected.
 
-Windows are identified as games using the following heuristics:
-1. **Window Class**: Resource class matching `steam_app_<appid>` (Proton and native Linux titles).
-2. **Environment**: `SteamGameId` or `SteamAppId` in `/proc/<pid>/environ`.
-3. **Command Line**: `AppId=<appid>` in `/proc/<pid>/cmdline` (detects games launched inside Gamescope nested sessions).
+Artwork also needs an image library called Pillow. If it is unavailable, the installer
+warns you and theater-mode uses a plain dark screen instead. Everything else still works.
 
-Desktop shells and Steam client processes (such as `steamwebhelper` and `plasmashell`) are ignored to prevent false positives.
+**The `theater-mode` command is not found**
 
-## Artwork Generation
+Close Konsole, open it again, and retry. If it is still missing, run the command using its
+full path: `~/.local/bin/theater-mode status`.
 
-When enabled, `theater-mode` locates cached Steam library hero artwork at `~/.local/share/Steam/appcache/librarycache/<appid>/**/library_hero.jpg`.
+**I still need help**
 
-* **Compositing**: The hero image is centered over a blurred, ambient backdrop and feathered at the seams. Artwork buffers are capped at 1920×1080 and scaled to the output by the Wayland compositor.
-* **Brightness**: `dim_factor` is applied directly to the image brightness during rendering so artwork darkens naturally.
-* **Caching**: Generated raw frames are cached in `~/.cache/theater-mode/` per AppID and resolution.
-* **Direct Mapping**: Raw premultiplied ARGB8888 frames are passed directly to `theater-dimmer` and mapped via `wl_shm` without image decoding in the display loop.
-* **Fallback**: If Pillow is not installed or hero art is unavailable, displays dim to solid black.
+Run this command and include its output when [opening a GitHub issue](https://github.com/seanbrar/theater-mode/issues):
 
-## Architecture & Design Notes
+```sh
+journalctl --user -u theater-mode.service -b --no-pager
+```
 
-* **Software Dimming**: Overlays are drawn as Wayland surfaces using the `wlr-layer-shell` protocol. Hardware backlight and DDC/CI states are untouched.
-* **Failure Safety**: `theater-dimmer` runs as a child process with stdin connected to the daemon. If the daemon exits or is killed, the helper detects EOF, destroys its surfaces, and exits cleanly.
-* **Clock-Driven Animations**: Fade transitions calculate progress using monotonic timestamps, ensuring correct restoration even if frame callbacks stall across display sleep.
-* **Live Reconfiguration**: Configuration updates, previews, and queries are served over D-Bus and re-applied to running effects without restarting the daemon.
+Before posting, glance over the output to remove any private usernames, home directory paths,
+or account details you prefer not to share publicly.
 
-## Components & File Layout
+Please also mention your Bazzite, SteamOS, or Linux distribution version; your Plasma
+version; and the game that caused the problem.
 
-| Path | Role |
-| --- | --- |
-| `~/.local/bin/theater-mode` | Client CLI for status, simulation, and live configuration over D-Bus. |
-| `~/.local/bin/theater-moded` | Python daemon managing state machine and D-Bus interfaces. |
-| `~/.local/bin/theater-dimmer` | Native C Wayland helper rendering overlay surfaces. |
-| `~/.local/share/kwin/scripts/theater-detect/` | KWin script reporting window events. |
-| `/sys/class/drm/card*-*/edid` | Read-only source for per-display identity matching. |
-| `~/.local/share/theater-mode/install.sh` | Copy of the installer, so `theater-mode uninstall` works without the release archive. |
-| `~/.config/theater-mode/config.toml` | User configuration file. |
-| `~/.config/systemd/user/theater-mode.service` | Systemd user service unit. |
-| `~/.cache/theater-mode/` | Generated artwork cache. |
+## How monitor selection works
+
+KDE tells theater-mode when a Steam game window opens, closes, enters fullscreen, or moves
+to another monitor. The monitor containing the game is left alone. Every other connected
+monitor receives the effect.
+
+You normally do not need to identify or arrange monitors yourself. Monitor names matter
+only when you want different settings on different screens; `theater-mode outputs` prints
+the exact names to use.
+
+The effect is a removable image drawn over the desktop. It does not change monitor
+brightness controls, HDR settings, or DDC/CI state. If the daemon stops unexpectedly, the
+overlay helper exits and removes its surfaces as well.
+
+Games running through Proton and games inside a nested Gamescope window are supported.
+Bazzite and SteamOS Game Mode are different: there is no KDE desktop there for
+theater-mode to watch, so Game Mode itself is not supported.
+
+## Installing from source
+
+A source install needs Python 3.12 or newer, PyGObject, a C compiler, `make`, `pkg-config`,
+and the libwayland development headers. Pillow is optional and adds artwork support.
+
+```sh
+git clone https://github.com/seanbrar/theater-mode
+cd theater-mode
+./install.sh
+```
+
+On an atomic desktop, build the native helper in Distrobox and run the installer from the
+host. The exact workflow is in [CONTRIBUTING.md](CONTRIBUTING.md#live-plasma-testing).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflows, testing, and commit guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment, tests, live
+desktop workflow, and contribution guidelines.
 
 ## License
 
