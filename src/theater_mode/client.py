@@ -246,6 +246,10 @@ def main(
     # config reload
     config_sub.add_parser("reload", help="Reload configuration files from disk")
 
+    # doctor
+    doc_p = subparsers.add_parser("doctor", help="Check this installation for problems")
+    doc_p.add_argument("--json", action="store_true", help="Output findings as JSON")
+
     # simulate
     sim_p = subparsers.add_parser("simulate", help="Simulate a game launch")
     sim_p.add_argument("appid", help="Steam AppID")
@@ -287,6 +291,13 @@ def main(
 
     if args.command == "uninstall":
         return _run_uninstaller(assume_yes=args.yes)
+
+    if args.command == "doctor":
+        from theater_mode import doctor
+
+        checks = doctor.run_checks(call_dbus)
+        print(doctor.to_json(checks) if args.json else doctor.format_report(checks))
+        return doctor.exit_code(checks)
 
     match args.command, getattr(args, "config_cmd", None):
         case "status", _:

@@ -126,16 +126,17 @@ Per-monitor settings can change `placement`, `dim_factor`, `art`, `duration`, an
 
 ## If something goes wrong
 
-**Nothing happens when a game starts**
-
-Run `theater-mode status`. If it cannot connect, restart the service with:
+Start here. This checks everything theater-mode depends on and tells you what to do about
+whatever it finds:
 
 ```sh
-systemctl --user restart theater-mode.service
+theater-mode doctor
 ```
 
-Also open **System Settings → Window Management → KWin Scripts** and make sure
-**Theater Mode Detector** is enabled.
+It covers your session type and Plasma version, both helper programs, the KWin script and
+whether it is switched on, the background service, your configuration, your displays, and
+the Steam artwork cache. Home directory paths are shortened to `~`, so the output is safe
+to paste into a bug report.
 
 **A monitor stays dim after the game closes**
 
@@ -153,21 +154,20 @@ library once and try again. Native and Flatpak Steam are both detected.
 **The `theater-mode` command is not found**
 
 Close Konsole, open it again, and retry. If it is still missing, run the command using its
-full path: `~/.local/bin/theater-mode status`.
+full path: `~/.local/bin/theater-mode doctor`.
 
 **I still need help**
 
-Run this command and include its output when [opening a GitHub issue](https://github.com/seanbrar/theater-mode/issues):
+Include the output of `theater-mode doctor` when
+[opening a GitHub issue](https://github.com/seanbrar/theater-mode/issues), along with the
+game that caused the problem. If the daemon is running but misbehaving, this adds detail:
 
 ```sh
 journalctl --user -u theater-mode.service -b --no-pager
 ```
 
-Before posting, glance over the output to remove any private usernames, home directory paths,
-or account details you prefer not to share publicly.
-
-Please also mention your Bazzite, SteamOS, or Linux distribution version; your Plasma
-version; and the game that caused the problem.
+Unlike `doctor`, that output is not filtered, so glance over it for usernames or paths you
+would rather not share publicly.
 
 ## How monitor selection works
 

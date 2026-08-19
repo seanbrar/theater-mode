@@ -56,6 +56,13 @@ ART_CACHE = _xdg_dir("XDG_CACHE_HOME", ".cache") / "theater-mode"
 DIMMER_BINARY_NAME = "theater-dimmer"
 ART_BINARY_NAME = "theater-art"
 
+# Session integration. These mirror install.sh: the KWin script is installed as a package
+# directory and switched on through the same kwinrc key System Settings writes.
+KWIN_PLUGIN_ID = "theater-detect"
+KWIN_SCRIPT_DIR = _xdg_dir("XDG_DATA_HOME", ".local/share") / "kwin" / "scripts" / KWIN_PLUGIN_ID
+KWIN_CONFIG_FILE = _xdg_dir("XDG_CONFIG_HOME", ".config") / "kwinrc"
+SERVICE_UNIT = "theater-mode.service"
+
 # Release distribution
 PROJECT_REPO = "seanbrar/theater-mode"
 RELEASE_API = f"https://api.github.com/repos/{PROJECT_REPO}/releases/latest"
