@@ -6,7 +6,7 @@ import contextlib
 import io
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from theater_mode.cli import parse_args as parse_daemon_args
 from theater_mode.client import (
@@ -228,6 +228,35 @@ class TestCLI(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         call_dbus.assert_called_once_with("Preview", '{"effect.dim_factor": 0.3}')
+
+    def test_client_main_version(self) -> None:
+        stdout = io.StringIO()
+        with (
+            self.assertRaises(SystemExit) as caught,
+            contextlib.redirect_stdout(stdout),
+        ):
+            client_main(["--version"])
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn("theater-mode", stdout.getvalue())
+
+    def test_client_main_uninstall_missing_installer(self) -> None:
+        with patch("pathlib.Path.is_file", return_value=False):
+            result, _, stderr, _ = self._run_client(["uninstall"], "")
+            self.assertEqual(result, 1)
+            self.assertIn("no uninstaller found", stderr)
+
+    def test_client_main_uninstall_executes_installer(self) -> None:
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value.returncode = 0
+            result, _, _, _ = self._run_client(["uninstall", "-y"], "")
+            self.assertEqual(result, 0)
+            mock_run.assert_called_once()
+            args = mock_run.call_args[0][0]
+            self.assertIn("--uninstall", args)
+            self.assertIn("--yes", args)
 
 
 if __name__ == "__main__":

@@ -16,11 +16,13 @@ PROJECT_REPO="seanbrar/theater-mode"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+LIBEXEC_DIR="$HOME/.local/libexec/theater-mode"
 
-DIMMER_BIN="$BIN_DIR/theater-dimmer"
-ART_BIN="$BIN_DIR/theater-art"
-DAEMON="$BIN_DIR/theater-moded"
+DIMMER_BIN="$LIBEXEC_DIR/theater-dimmer"
+ART_BIN="$LIBEXEC_DIR/theater-art"
+DAEMON="$LIBEXEC_DIR/theater-moded"
 CLIENT="$BIN_DIR/theater-mode"
+CLIENT_ALIAS="$BIN_DIR/theatre-mode"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
 KWIN_PLUGIN_ID="theater-detect"
@@ -109,7 +111,7 @@ render_unit() {
     [ -e "$src" ] || die "missing from repo: $src"
     mkdir -p "$(dirname "$UNIT")" || die "could not create $(dirname "$UNIT")"
     case "$DAEMON" in
-        *$'\n'*|*$'\r'*) die "XDG_BIN_HOME must not contain newlines" ;;
+        *$'\n'*|*$'\r'*) die "the daemon path must not contain newlines: $DAEMON" ;;
     esac
 
     # Quote systemd syntax without passing the path through a text-substitution language.
@@ -345,6 +347,7 @@ do_install() {
     verify_helper art "$ART_SOURCE"
 
     echo "Installing theater-mode:"
+    rm -f "$BIN_DIR/theater-dimmer" "$BIN_DIR/theater-art" "$BIN_DIR/theater-moded"
     place "$DIMMER_SOURCE" "$DIMMER_BIN"
     chmod +x "$DIMMER_BIN"
     place "$ART_SOURCE" "$ART_BIN"
@@ -353,6 +356,7 @@ do_install() {
     chmod +x "$DAEMON"
     place "$REPO/bin/theater-mode" "$CLIENT"
     chmod +x "$CLIENT"
+    ln -sfn "theater-mode" "$CLIENT_ALIAS" && info "$CLIENT_ALIAS -> theater-mode"
     place "$REPO/src/theater_mode" "$APP_DATA/lib/theater_mode"
     prune_package_copy
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
@@ -453,7 +457,8 @@ EOF
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$DIMMER_BIN" "$ART_BIN" "$DAEMON" "$CLIENT" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA")
+    local targets=("$LIBEXEC_DIR" "$CLIENT" "$CLIENT_ALIAS" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA" \
+                   "$BIN_DIR/theater-dimmer" "$BIN_DIR/theater-art" "$BIN_DIR/theater-moded")
     local found=0
     for t in "${targets[@]}"; do
         if [ -e "$t" ] || [ -L "$t" ]; then

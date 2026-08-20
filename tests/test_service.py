@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock
 
-from theater_mode.constants import INTERFACE
+from theater_mode.constants import INTERFACE, OBJECT_PATH
 from theater_mode.service import make_handler
 
 
@@ -29,7 +29,7 @@ class TestServiceDispatch(unittest.TestCase):
         self.handler(
             self.mock_conn,
             ":1.42",
-            "/org/freedesktop/TheaterMode",
+            OBJECT_PATH,
             INTERFACE,
             method,
             params,

@@ -115,16 +115,17 @@ jobs:
 
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
             HOME="$PWD/fakehome" "$root/install.sh" --no-service
-          for file in .local/bin/theater-mode .local/bin/theater-moded \
-                      .local/bin/theater-dimmer \
-                      .local/bin/theater-art \
+          for file in .local/bin/theater-mode .local/bin/theatre-mode \
+                      .local/libexec/theater-mode/theater-moded \
+                      .local/libexec/theater-mode/theater-dimmer \
+                      .local/libexec/theater-mode/theater-art \
                       .local/share/theater-mode/lib/theater_mode/update.py \
                       .local/share/kwin/scripts/theater-detect/metadata.json \
                       .config/systemd/user/theater-mode.service; do
             [ -e "$PWD/fakehome/$file" ]
           done
-          "$PWD/fakehome/.local/bin/theater-dimmer" --version
-          "$PWD/fakehome/.local/bin/theater-art" --version
+          "$PWD/fakehome/.local/libexec/theater-mode/theater-dimmer" --version
+          "$PWD/fakehome/.local/libexec/theater-mode/theater-art" --version
           [ -x "$PWD/fakehome/.local/share/theater-mode/install.sh" ]
 
           rm -rf rel dist

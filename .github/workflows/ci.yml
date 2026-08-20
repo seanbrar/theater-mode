@@ -51,7 +51,10 @@ jobs:
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
               HOME="$fake" XDG_BIN_HOME="$bin" ./install.sh --no-service
 
-          for file in "$bin/theater-mode" "$bin/theater-moded" "$bin/theater-dimmer" "$bin/theater-art" \
+          for file in "$bin/theater-mode" "$bin/theatre-mode" \
+                      "$fake/.local/libexec/theater-mode/theater-moded" \
+                      "$fake/.local/libexec/theater-mode/theater-dimmer" \
+                      "$fake/.local/libexec/theater-mode/theater-art" \
                       "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
                       "$fake/.local/share/theater-mode/config.reference.toml" \
                       "$fake/.local/share/kwin/scripts/theater-detect/metadata.json" \
@@ -61,7 +64,7 @@ jobs:
 
           unit="$fake/.config/systemd/user/theater-mode.service"
           [ "$(sed -n 's|^ExecStart=/usr/bin/env -- "\(.*\)"$|\1|p' "$unit")" = \
-            "$bin/theater-moded" ] || fail "unit contains the wrong daemon path"
+            "$fake/.local/libexec/theater-mode/theater-moded" ] || fail "unit contains the wrong daemon path"
           systemd-analyze verify "$unit"
 
           [ ! -e "$fake/.local/share/theater-mode/lib/theater_mode/dimmer" ] \
@@ -96,8 +99,8 @@ jobs:
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
             HOME="$fake" "$root/install.sh" --no-service
           test -f "$fake/.local/share/theater-mode/lib/theater_mode/update.py"
-          "$fake/.local/bin/theater-dimmer" --version
-          "$fake/.local/bin/theater-art" --version
+          "$fake/.local/libexec/theater-mode/theater-dimmer" --version
+          "$fake/.local/libexec/theater-mode/theater-art" --version
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
             HOME="$fake" "$fake/.local/share/theater-mode/install.sh" \
               --uninstall --no-service --yes
@@ -119,18 +122,21 @@ jobs:
 
           run "$root/install.sh" --no-service
           # Prove the second run actually replaces files rather than skipping them.
-          echo 'stale' > "$fake/.local/bin/theater-dimmer"
+          echo 'stale' > "$fake/.local/libexec/theater-mode/theater-dimmer"
           printf 'stale\n' >> "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py"
 
           run "$root/install.sh" --preserve-service
 
-          run "$fake/.local/bin/theater-dimmer" --version >/dev/null \
+          run "$fake/.local/libexec/theater-mode/theater-dimmer" --version >/dev/null \
             || fail "upgrade left an unusable theater-dimmer"
-          run "$fake/.local/bin/theater-art" --version >/dev/null \
+          run "$fake/.local/libexec/theater-mode/theater-art" --version >/dev/null \
             || fail "upgrade left an unusable theater-art"
           grep -q '^stale$' "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
             && fail "upgrade did not replace the installed package"
-          for file in "$fake/.local/bin/theater-mode" "$fake/.local/bin/theater-moded" "$fake/.local/bin/theater-art" \
+          for file in "$fake/.local/bin/theater-mode" "$fake/.local/bin/theatre-mode" \
+                      "$fake/.local/libexec/theater-mode/theater-moded" \
+                      "$fake/.local/libexec/theater-mode/theater-art" \
+                      "$fake/.local/libexec/theater-mode/theater-dimmer" \
                       "$fake/.local/share/theater-mode/install.sh" \
                       "$fake/.config/systemd/user/theater-mode.service"; do
             [ -e "$file" ] || fail "upgrade lost $file"
@@ -154,9 +160,9 @@ jobs:
           # --build must compile even though the archive ships a prebuilt helper.
           built="$RUNNER_TEMP/build-home"
           run "$built" "$root/install.sh" --no-service --build
-          run "$built" "$built/.local/bin/theater-dimmer" --version >/dev/null \
+          run "$built" "$built/.local/libexec/theater-mode/theater-dimmer" --version >/dev/null \
             || fail "--build produced an unusable dimmer helper"
-          run "$built" "$built/.local/bin/theater-art" --version >/dev/null \
+          run "$built" "$built/.local/libexec/theater-mode/theater-art" --version >/dev/null \
             || fail "--build produced an unusable art helper"
 
           # Each helper resolves independently: a missing art prebuilt must not force
@@ -168,7 +174,7 @@ jobs:
           art_built="$RUNNER_TEMP/art-build-home"
           run "$art_built" "$partial/install.sh" --no-service \
             --dimmer-bin "$root/bin/theater-dimmer"
-          run "$art_built" "$art_built/.local/bin/theater-art" --version >/dev/null \
+          run "$art_built" "$art_built/.local/libexec/theater-mode/theater-art" --version >/dev/null \
             || fail "art-only build produced an unusable helper"
 
           # --dimmer-bin and --art-bin must install exactly the file they are given.
@@ -177,10 +183,10 @@ jobs:
             --dimmer-bin src/theater_mode/dimmer/theater-dimmer \
             --art-bin src/theater_mode/art/theater-art
           cmp -s src/theater_mode/dimmer/theater-dimmer \
-                 "$given/.local/bin/theater-dimmer" \
+                 "$given/.local/libexec/theater-mode/theater-dimmer" \
             || fail "--dimmer-bin did not install the helper it was given"
           cmp -s src/theater_mode/art/theater-art \
-                 "$given/.local/bin/theater-art" \
+                 "$given/.local/libexec/theater-mode/theater-art" \
             || fail "--art-bin did not install the helper it was given"
 
           # A helper that cannot execute must be refused before anything is installed.

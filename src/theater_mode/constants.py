@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 
 # D-Bus Registration
-BUS_NAME = "org.theatermode.TheaterMode"
-OBJECT_PATH = "/org/theatermode/TheaterMode"
-INTERFACE = "org.theatermode.TheaterMode"
+BUS_NAME = "com.seanbrar.TheaterMode"
+OBJECT_PATH = "/com/seanbrar/TheaterMode"
+INTERFACE = "com.seanbrar.TheaterMode"
 
 
 def _xdg_dir(variable: str, fallback: str) -> Path:
@@ -19,6 +19,8 @@ def _xdg_dir(variable: str, fallback: str) -> Path:
 
 # Installed Layout
 APP_DATA = _xdg_dir("XDG_DATA_HOME", ".local/share") / "theater-mode"
+
+LIBEXEC_DIR = Path.home() / ".local/libexec/theater-mode"
 
 # Steam & Artwork Cache Paths
 STEAM_LIBRARY_CACHE = (

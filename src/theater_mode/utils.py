@@ -6,6 +6,8 @@ import os
 import shutil
 from pathlib import Path
 
+from theater_mode.constants import LIBEXEC_DIR
+
 
 def parse_bool(value: str | bool) -> bool:
     """Parse string representation of boolean values safely."""
@@ -56,7 +58,7 @@ def read_process_environ(pid: int) -> dict[str, str]:
 
 
 def find_helper_binary(name: str, env_var: str, subdir: str) -> Path | None:
-    """Locate a compiled helper executable (from env override, package dir, XDG bin, or PATH)."""
+    """Locate a compiled helper executable (from env override, package dir, libexec, or PATH)."""
     env_path = os.environ.get(env_var)
     if env_path and (p := Path(env_path)).is_file() and os.access(p, os.X_OK):
         return p
@@ -65,9 +67,9 @@ def find_helper_binary(name: str, env_var: str, subdir: str) -> Path | None:
     if pkg_bin.is_file() and os.access(pkg_bin, os.X_OK):
         return pkg_bin
 
-    local_bin = Path(os.environ.get("XDG_BIN_HOME", Path.home() / ".local/bin")) / name
-    if local_bin.is_file() and os.access(local_bin, os.X_OK):
-        return local_bin
+    libexec_bin = LIBEXEC_DIR / name
+    if libexec_bin.is_file() and os.access(libexec_bin, os.X_OK):
+        return libexec_bin
 
     which_bin = shutil.which(name)
     if which_bin:

@@ -6,9 +6,9 @@
  * are handled by theater-moded.
  */
 
-var SERVICE = "org.theatermode.TheaterMode";
-var OBJPATH = "/org/theatermode/TheaterMode";
-var IFACE = "org.theatermode.TheaterMode";
+var SERVICE = "com.seanbrar.TheaterMode";
+var OBJPATH = "/com/seanbrar/TheaterMode";
+var IFACE = "com.seanbrar.TheaterMode";
 
 // Periodic full snapshot interval to keep state synchronized with daemon.
 var SNAPSHOT_INTERVAL_MS = 60000;
