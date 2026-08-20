@@ -29,29 +29,31 @@ struct mask_buffer {
     uint8_t *data;
 };
 
-/* Allocate an empty image buffer. */
+/* Allocate an empty image buffer. Returns NULL if geometry is invalid or allocation fails. */
 struct image_buffer *image_buffer_create(int width, int height, int channels);
 
-/* Free an image buffer and its pixel storage. */
+/* Free an image buffer and its underlying pixel allocation. */
 void image_buffer_free(struct image_buffer *buf);
 
-/* Load a JPEG or PNG from disk into an RGB24 image buffer. Returns NULL on failure or corrupt data. */
+/* Load a JPEG or PNG from disk into an RGB24 image buffer. Returns NULL on failure or corrupt data. Caller owns the returned buffer. */
 struct image_buffer *image_load(const char *path, size_t max_bytes);
 
-/* Resample an RGB image using separable bilinear filtering (support-scaled for downscale). */
+/* Resample an RGB image using separable bilinear filtering (support-scaled for downscaling). Returns NULL on allocation failure. Caller owns the returned buffer. */
 struct image_buffer *image_resample_bilinear(const struct image_buffer *src, int dst_w, int dst_h);
 
-/* Resample an RGB image using separable Lanczos-3 sinc filtering. */
+/* Resample an RGB image using separable Lanczos-3 sinc filtering. Returns NULL on allocation failure. Caller owns the returned buffer. */
 struct image_buffer *image_resample_lanczos(const struct image_buffer *src, int dst_w, int dst_h);
 
 /* Apply 3-pass extended box blur (Kutskir integer-box Gaussian approximation) in place. */
 void image_gaussian_blur(struct image_buffer *img, float radius);
 
-/* Multiply RGB channels by factor, truncating/clamping in [0, 255]. */
+/* Multiply RGB channels by factor, clamping in [0, 255]. */
 void image_enhance_brightness(struct image_buffer *img, float factor);
 
-/* Generate 1D feather gradient mask. */
+/* Generate 1D feather gradient mask. Caller owns the returned mask buffer. */
 struct mask_buffer *image_create_feather_mask(int length, int feather, bool horizontal);
+
+/* Free a feather mask buffer and its underlying table allocation. */
 void mask_buffer_free(struct mask_buffer *mask);
 
 /* Composite foreground over backdrop with optional feather mask. */
@@ -63,10 +65,10 @@ void image_composite_over(
     const struct mask_buffer *mask
 );
 
-/* Write the final image as raw ARGB8888 (BGRA byte order) atomically via deterministic .tmp. */
+/* Write the final image as raw ARGB8888 (BGRA byte order) atomically via deterministic .tmp. Returns 0 on success, non-zero on failure. */
 int image_write_argb(const struct image_buffer *img, const char *target_path);
 
-/* Full backdrop rendering pipeline from input image to output ARGB using integer dim_millis (0..1000). */
+/* Full backdrop rendering pipeline from input image to output ARGB using integer dim_millis (0..1000). Returns 0 on success, non-zero on failure. */
 int render_artwork_pipeline(
     const char *input_path,
     const char *output_path,

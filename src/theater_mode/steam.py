@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import stat
 import subprocess
 from pathlib import Path
 
@@ -22,6 +23,8 @@ log = logging.getLogger("theater-moded")
 ARTWORK_CACHE_VERSION = 3
 ARTWORK_MAX_WIDTH = 1920
 ARTWORK_MAX_HEIGHT = 1080
+ARTWORK_CACHE_MAX_BYTES = 128 * 1024 * 1024
+ARTWORK_CACHE_TRIM_BYTES = 64 * 1024 * 1024
 
 
 def steam_appid_for_window(resource_class: str, pid: int) -> str | None:
@@ -60,19 +63,23 @@ def find_hero_art(appid: str) -> Path | None:
     Note: Local artwork is available for games whose store or library page has been
     viewed in the Steam client. Returns None if artwork is unavailable.
     """
-    override = get_dev_config().force_art_dir
-    library_caches = (override,) if override is not None else STEAM_LIBRARY_CACHES
-    candidates = [
-        candidate
-        for library_cache in library_caches
-        if (app_cache_dir := library_cache / appid).is_dir()
-        for candidate in app_cache_dir.rglob("library_hero.jpg")
-    ]
-    if not candidates:
-        return None
+    try:
+        override = get_dev_config().force_art_dir
+        library_caches = (override,) if override is not None else STEAM_LIBRARY_CACHES
+        candidates: list[Path] = []
+        for library_cache in library_caches:
+            app_cache_dir = library_cache / appid
+            if not app_cache_dir.is_dir():
+                continue
+            candidates.extend(app_cache_dir.rglob("library_hero.jpg"))
 
-    # Pick the largest candidate file (resolving hash directories vs flat layouts)
-    return max(candidates, key=lambda p: p.stat().st_size)
+        if not candidates:
+            return None
+
+        # Pick the largest candidate file (resolving hash directories vs flat layouts)
+        return max(candidates, key=lambda p: p.stat().st_size)
+    except OSError:
+        return None
 
 
 def artwork_render_size(width: int, height: int) -> tuple[int, int]:
@@ -86,29 +93,76 @@ def find_art_binary() -> Path | None:
     return find_helper_binary(ART_BINARY_NAME, "THEATER_ART_BIN", "art")
 
 
+def prune_artwork_cache(
+    target_cache: Path = ART_CACHE,
+    current_target: Path | None = None,
+    max_bytes: int = ARTWORK_CACHE_MAX_BYTES,
+    trim_to_bytes: int = ARTWORK_CACHE_TRIM_BYTES,
+) -> None:
+    """Evict oldest cached artwork files when total size exceeds max_bytes, trimming to trim_to_bytes."""
+    try:
+        if not target_cache.is_dir():
+            return
+
+        entries: list[tuple[Path, int, float]] = []
+        total_size = 0
+        for p in target_cache.glob("*.argb"):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            # Only regular files are evictable; unlink on any other entry aborts the prune.
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            entries.append((p, st.st_size, st.st_mtime))
+            total_size += st.st_size
+
+        if total_size <= max_bytes:
+            return
+
+        entries.sort(key=lambda item: item[2])
+        for p, size, _ in entries:
+            if p == current_target:
+                continue
+            p.unlink(missing_ok=True)
+            total_size -= size
+            if total_size <= trim_to_bytes:
+                break
+    except OSError:
+        pass
+
+
 def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Path | None:
     """Generate and cache a raw ARGB8888 composite from Steam hero art at target resolution.
 
     Overlays hero artwork onto a blurred, darkened ambient background with feathered
     edges, baking dim_factor directly into image brightness for the dimmer helper.
     """
-    source = find_hero_art(appid)
-    if source is None:
-        return None
-
-    dim_millis = round(max(0.0, min(1.0, dim_factor)) * 1000)
-    target = ART_CACHE / f"{appid}-v{ARTWORK_CACHE_VERSION}-{width}x{height}-d{dim_millis:04d}.argb"
-    if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
-        return target
-
-    binary = find_art_binary()
-    if binary is None:
-        log.warning("could not find %s helper to generate artwork", ART_BINARY_NAME)
-        return None
-
-    ART_CACHE.mkdir(parents=True, exist_ok=True)
-
     try:
+        source = find_hero_art(appid)
+        if source is None:
+            return None
+
+        dim_millis = round(max(0.0, min(1.0, dim_factor)) * 1000)
+        target = (
+            ART_CACHE / f"{appid}-v{ARTWORK_CACHE_VERSION}-{width}x{height}-d{dim_millis:04d}.argb"
+        )
+        if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
+            # Touch to update recency for LRU cache pruning.
+            try:
+                target.touch()
+            except OSError:
+                pass
+            prune_artwork_cache(ART_CACHE, current_target=target)
+            return target
+
+        binary = find_art_binary()
+        if binary is None:
+            log.warning("could not find %s helper to generate artwork", ART_BINARY_NAME)
+            return None
+
+        ART_CACHE.mkdir(parents=True, exist_ok=True)
+
         cmd = [
             str(binary),
             str(source),
@@ -132,12 +186,13 @@ def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Pat
         if not target.is_file():
             log.error("theater-art did not produce target file %s", target)
             return None
+
+        prune_artwork_cache(ART_CACHE, current_target=target)
+        log.debug("built artwork %s (%dx%d, dim %d/1000)", target, width, height, dim_millis)
+        return target
     except subprocess.TimeoutExpired:
         log.error("theater-art timed out generating artwork for appid %s", appid)
         return None
-    except Exception:
-        log.exception("could not build artwork for appid %s", appid)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not build artwork for appid %s: %s", appid, exc)
         return None
-
-    log.debug("built artwork %s (%dx%d, dim %d/1000)", target, width, height, dim_millis)
-    return target

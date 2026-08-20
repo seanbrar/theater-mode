@@ -11,10 +11,13 @@ var OBJPATH = "/com/seanbrar/TheaterMode";
 var IFACE = "com.seanbrar.TheaterMode";
 
 // Periodic full snapshot interval to keep state synchronized with daemon.
-var SNAPSHOT_INTERVAL_MS = 60000;
+var SNAPSHOT_INTERVAL_MS = 15000;
 
 // Tracked windows, keyed by internalId, storing last announced state.
 var tracked = {};
+
+// Windows whose output/fullscreen signal listeners have been connected.
+var watched = {};
 
 // Delay to coalesce rapid screensChanged signals during display mode changes.
 var SCREENS_SETTLE_MS = 1000;
@@ -35,9 +38,9 @@ function outputNameOf(window) {
     }
 }
 
-// Filter out windows without a valid PID.
+// Ignore windows without a valid PID, and panels, docks, and other non-normal windows.
 function isCandidate(window) {
-    return !!window && window.pid > 0;
+    return !!window && window.pid > 0 && window.normalWindow === true;
 }
 
 function announceOpened(window) {
@@ -53,11 +56,17 @@ function announceOpened(window) {
              String(window.resourceClass),
              String(window.pid),
              output,
-             String(fullscreen),
-             String(window.normalWindow === true));
+             String(fullscreen));
 }
 
 function announceChanged(window) {
+    // A window can fail isCandidate after having passed it, while its listeners stay
+    // connected. Retire it here rather than re-announcing it as opened.
+    if (!isCandidate(window)) {
+        announceClosed(window);
+        return;
+    }
+
     var id = idOf(window);
     var previous = tracked[id];
     if (!previous) {
@@ -78,6 +87,7 @@ function announceChanged(window) {
 
 function announceClosed(window) {
     var id = idOf(window);
+    delete watched[id];
     if (!tracked[id]) {
         return;
     }
@@ -87,6 +97,11 @@ function announceClosed(window) {
 
 // Track display output and fullscreen state changes for a window.
 function watch(window) {
+    var id = idOf(window);
+    if (watched[id]) {
+        return;
+    }
+    watched[id] = true;
     var onChanged = function () { announceChanged(window); };
     window.outputChanged.connect(onChanged);
     window.fullScreenChanged.connect(onChanged);
@@ -113,6 +128,7 @@ function sendSnapshot() {
     for (var i = 0; i < windows.length; i++) {
         if (isCandidate(windows[i])) {
             announceOpened(windows[i]);
+            watch(windows[i]);
         }
     }
 
@@ -136,13 +152,6 @@ function watchScreens() {
 }
 
 function init() {
-    var windows = workspace.windowList();
-    for (var i = 0; i < windows.length; i++) {
-        if (isCandidate(windows[i])) {
-            watch(windows[i]);
-        }
-    }
-
     workspace.windowAdded.connect(onWindowAdded);
     workspace.windowRemoved.connect(onWindowRemoved);
     watchScreens();

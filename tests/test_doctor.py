@@ -7,6 +7,7 @@ import io
 import json
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -35,10 +36,42 @@ def healthy_dbus(method: str, *_args: object) -> str:
         return "[]"
     if method == "GetOutputs":
         return json.dumps([{"connector": "DP-1"}, {"connector": "DP-2"}])
+    if method == "Status":
+        return json.dumps(
+            {
+                "effect": "dim",
+                "effect_process_running": False,
+                "affected_outputs": [],
+                "detector_silence_seconds": 5.0,
+                "active_output": None,
+                "applied_outputs": None,
+                "window_count": 0,
+            }
+        )
     return "running"
 
 
 class DoctorTestCase(unittest.TestCase):
+    def test_plasma_version_check(self) -> None:
+        versions = [
+            ("plasmashell 6.2.0", doctor.OK),
+            ("plasmashell 6.7.4", doctor.OK),
+            ("plasmashell 7.0.0", doctor.OK),
+            ("plasmashell 6.1.5", doctor.FAIL),
+            ("plasmashell 6.0.0", doctor.FAIL),
+            ("plasmashell 5.27.10", doctor.FAIL),
+        ]
+        for output, expected_status in versions:
+            with self.subTest(output=output):
+
+                def custom_run(cmd: list[str]) -> tuple[int, str]:
+                    if Path(cmd[0]).name == "plasmashell":
+                        return 0, output
+                    return healthy_run(cmd)
+
+                checks = self.run_checks(run=custom_run)
+                self.assertEqual(self.status_of(checks, "Plasma version"), expected_status)
+
     """Pins every filesystem probe inside a temporary tree so results never vary by host."""
 
     def setUp(self) -> None:
@@ -308,6 +341,59 @@ class TestDoctorCliRouting(DoctorTestCase):
         with patch.object(doctor, "run_checks", return_value=failing):
             code, _ = self._run(["doctor"])
         self.assertEqual(code, 1)
+
+    def test_stopped_effect_helper_reports_failure_only_when_outputs_are_active(self) -> None:
+        def with_stopped_helper(method: str, *_args: object) -> str:
+            if method == "Status":
+                return json.dumps(
+                    {
+                        "effect": "dim",
+                        "effect_process_running": False,
+                        "affected_outputs": ["DP-2"],
+                    }
+                )
+            return healthy_dbus(method)
+
+        checks = self.run_checks(call_dbus=with_stopped_helper)
+        self.assertEqual(self.status_of(checks, "Display effect helper"), doctor.FAIL)
+
+        idle_checks = self.run_checks(call_dbus=healthy_dbus)
+        self.assertNotIn("Display effect helper", [check.name for check in idle_checks])
+
+    def test_unreadable_status_is_reported(self) -> None:
+        def bad_status(method: str, *_args: object) -> str:
+            if method == "Status":
+                return "not json"
+            return healthy_dbus(method)
+
+        checks = self.run_checks(call_dbus=bad_status)
+        self.assertEqual(self.status_of(checks, "Status report"), doctor.FAIL)
+
+    def test_kwin_detector_contact_checks(self) -> None:
+        def silent_for(seconds: float) -> Callable[..., str]:
+            def call_dbus(method: str, *_args: object) -> str:
+                if method == "Status":
+                    return json.dumps(
+                        {
+                            "effect": "dim",
+                            "effect_process_running": False,
+                            "affected_outputs": [],
+                            "detector_silence_seconds": seconds,
+                        }
+                    )
+                return healthy_dbus(method)
+
+            return call_dbus
+
+        # Daemon awaiting its first snapshot is quiet, not broken.
+        checks = self.run_checks(call_dbus=silent_for(0.0))
+        self.assertEqual(self.status_of(checks, "KWin detector contact"), doctor.OK)
+
+        checks = self.run_checks(call_dbus=silent_for(90.0))
+        self.assertEqual(self.status_of(checks, "KWin detector contact"), doctor.FAIL)
+
+        checks = self.run_checks(call_dbus=healthy_dbus)
+        self.assertEqual(self.status_of(checks, "KWin detector contact"), doctor.OK)
 
 
 if __name__ == "__main__":

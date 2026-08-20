@@ -40,10 +40,17 @@ def normalize_table_path(raw: str) -> str:
     return ".".join(segment for segment in segments if segment)
 
 
+def system_config_dirs() -> list[Path]:
+    """Return absolute paths from XDG_CONFIG_DIRS in preference order (defaults to /etc/xdg)."""
+    raw = os.environ.get("XDG_CONFIG_DIRS", "")
+    dirs = [candidate for entry in raw.split(":") if (candidate := Path(entry)).is_absolute()]
+    return dirs or [Path("/etc/xdg")]
+
+
 def get_default_system_path() -> Path:
-    """Return the single standard system configuration file path."""
-    first_dir = os.environ.get("XDG_CONFIG_DIRS", "").split(":")[0]
-    return Path(first_dir or "/etc/xdg") / "theater-mode" / "config.toml"
+    """Return the first existing system config in XDG_CONFIG_DIRS, falling back to the first candidate."""
+    candidates = [directory / "theater-mode" / "config.toml" for directory in system_config_dirs()]
+    return next((path for path in candidates if path.is_file()), candidates[0])
 
 
 def get_default_user_path() -> Path:
@@ -95,7 +102,7 @@ def lookup_spec(key_path: str) -> FieldSpec | None:
 
 
 def _extract_line_numbers(text: str) -> dict[str, int]:
-    """Map key paths ('effect.mode', 'outputs.DP-1.dim_factor') to their line numbers."""
+    """Map key paths ('effect.placement', 'outputs.DP-1.dim_factor') to their line numbers."""
     line_map: dict[str, int] = {}
     current_table = ""
 
@@ -354,8 +361,7 @@ class ConfigLoader:
                 continue
 
             table, leaf = split
-            # Record provenance under the canonical unquoted path so it lines up with the
-            # keys the file layers produce.
+            # Provenance uses unquoted key paths to match file layers.
             key_path = f"{table}.{leaf}"
 
             value = self.validate_leaf(spec, raw_value, key_path)

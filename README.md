@@ -21,7 +21,7 @@ The installer checks your desktop and stops with an explanation if it is not com
 
 ## Install
 
-Open Konsole, paste this command, and press Enter:
+Open a terminal, paste this command, and press Enter:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/seanbrar/theater-mode/main/get.sh | bash
@@ -140,7 +140,7 @@ to paste into a bug report.
 
 **A monitor stays dim after the game closes**
 
-Restore every monitor immediately:
+Stop theater mode and begin restoring every monitor:
 
 ```sh
 theater-mode clear
@@ -153,7 +153,7 @@ library once and try again. Native and Flatpak Steam are both detected.
 
 **The `theater-mode` command is not found**
 
-Close Konsole, open it again, and retry. If it is still missing, run the command using its
+Close your terminal, open a new one, and retry. If it is still missing, run the command using its
 full path: `~/.local/bin/theater-mode doctor`.
 
 **I still need help**
@@ -198,7 +198,7 @@ cd theater-mode
 ./install.sh
 ```
 
-On an atomic desktop, build the native helper in Distrobox and run the installer from the
+On an atomic desktop, build the native helpers in Distrobox and run the installer from the
 host. The exact workflow is in [CONTRIBUTING.md](CONTRIBUTING.md#live-plasma-testing).
 
 ## Contributing

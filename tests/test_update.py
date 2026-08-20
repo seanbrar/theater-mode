@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from theater_mode import update
 
@@ -227,6 +227,27 @@ class ApplyGuardTests(unittest.TestCase):
             with self.assertRaises(update.UpdateError) as caught:
                 update.apply(stream=io.StringIO())
         self.assertIn("could not unpack", str(caught.exception))
+
+    def test_success_describes_installed_files_without_claiming_live_activation(self):
+        archive = b"archive"
+        checksum = f"{hashlib.sha256(archive).hexdigest()}  release.tar.gz\n".encode()
+        stream = io.StringIO()
+        root = MagicMock(spec=Path)
+        root.is_dir.return_value = True
+        with (
+            patch.object(
+                update,
+                "fetch_latest",
+                return_value=update.Release("999.0.0", "archive", "checksum"),
+            ),
+            patch.object(update, "_get", side_effect=[archive, checksum]),
+            patch("tarfile.open"),
+            patch.object(update, "_run_installer"),
+            patch("pathlib.Path.iterdir", return_value=[root]),
+        ):
+            update.apply(stream=stream)
+
+        self.assertIn("999.0.0 files are installed", stream.getvalue())
 
 
 if __name__ == "__main__":

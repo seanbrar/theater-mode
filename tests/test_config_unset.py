@@ -75,9 +75,9 @@ class TestRemoveTomlKeys(unittest.TestCase):
         self.assertIn("[outputs.DP-1]", text)
 
     def test_multiple_keys_across_tables(self) -> None:
-        original = '[effect]\ndim_factor = 0.5\nmode = "dim"\n\n[daemon]\nrevert_delay = 2.0\n'
-        text, removed = remove_toml_keys(original, {"effect.mode", "daemon.revert_delay"})
-        self.assertEqual(removed, {"effect.mode", "daemon.revert_delay"})
+        original = '[effect]\ndim_factor = 0.5\nplacement = "behind_windows"\n\n[daemon]\nrevert_delay = 2.0\n'
+        text, removed = remove_toml_keys(original, {"effect.placement", "daemon.revert_delay"})
+        self.assertEqual(removed, {"effect.placement", "daemon.revert_delay"})
         self.assertIn("dim_factor = 0.5", text)
         self.assertNotIn("revert_delay", text)
 
@@ -189,24 +189,31 @@ class TestClientUnsetRouting(unittest.TestCase):
         return code, out.getvalue(), call
 
     def test_sends_key_list_and_reports_the_new_value(self) -> None:
-        resolved = {"effect": {"dim_factor": 0.75}, "provenance": {}, "outputs": {}}
+        resolved = {"effect": {"dim_factor": 0.75, "art": True}, "provenance": {}, "outputs": {}}
         code, out, call = self._run(
-            ["config", "unset", "effect.dim_factor"],
-            {"Unset": "unset 1 keys", "GetResolved": json.dumps(resolved)},
+            ["config", "unset", "effect.dim_factor", "effect.art"],
+            {"Unset": "unset 2 keys", "GetResolved": json.dumps(resolved)},
         )
         self.assertEqual(code, 0)
-        self.assertEqual(call.call_args_list[0][0], ("Unset", '["effect.dim_factor"]'))
+        self.assertEqual(
+            call.call_args_list[0][0], ("Unset", '["effect.dim_factor", "effect.art"]')
+        )
         self.assertIn("effect.dim_factor is now 0.75", out)
+        self.assertIn("effect.art is now true", out)
 
     def test_accepts_several_keys_at_once(self) -> None:
-        resolved = {"effect": {"dim_factor": 0.75, "mode": "dim"}, "provenance": {}, "outputs": {}}
+        resolved = {
+            "effect": {"dim_factor": 0.75, "placement": "over_windows"},
+            "provenance": {},
+            "outputs": {},
+        }
         code, _out, call = self._run(
-            ["config", "unset", "effect.dim_factor", "effect.mode"],
+            ["config", "unset", "effect.dim_factor", "effect.placement"],
             {"Unset": "unset 2 of 2 keys", "GetResolved": json.dumps(resolved)},
         )
         self.assertEqual(code, 0)
         self.assertEqual(
-            json.loads(call.call_args_list[0][0][1]), ["effect.dim_factor", "effect.mode"]
+            json.loads(call.call_args_list[0][0][1]), ["effect.dim_factor", "effect.placement"]
         )
 
     def test_rejected_key_exits_nonzero(self) -> None:

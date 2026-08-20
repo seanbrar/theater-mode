@@ -9,12 +9,10 @@ from typing import Any
 from theater_mode.config.provenance import Layer, Provenance
 
 # Allowed choices
-VALID_EFFECT_MODES: frozenset[str] = frozenset({"dim", "log"})
 VALID_EASING_CURVES: frozenset[str] = frozenset({"sine", "quad", "cubic", "linear"})
 VALID_PLACEMENTS: frozenset[str] = frozenset({"over_windows", "behind_windows"})
 
 # Defaults
-DEFAULT_EFFECT_MODE = "dim"
 DEFAULT_PLACEMENT = "over_windows"
 DEFAULT_DIM_FACTOR = 0.85
 DEFAULT_ART = True
@@ -43,14 +41,6 @@ class FieldSpec:
 
 # Schema field declarations
 EFFECT_FIELDS: dict[str, FieldSpec] = {
-    "mode": FieldSpec(
-        key="mode",
-        type_name="string",
-        default=DEFAULT_EFFECT_MODE,
-        choices=VALID_EFFECT_MODES,
-        allow_in_output=False,
-        doc="Display effect to apply to secondary outputs: 'dim' (cinematic overlay) or 'log' (dry run).",
-    ),
     "placement": FieldSpec(
         key="placement",
         type_name="string",
@@ -131,14 +121,12 @@ SCHEMA_TABLES: dict[str, dict[str, FieldSpec]] = {
 class EffectConfig:
     """Resolved global effect settings."""
 
-    mode: str = DEFAULT_EFFECT_MODE
     placement: str = DEFAULT_PLACEMENT
     dim_factor: float = DEFAULT_DIM_FACTOR
     art: bool = DEFAULT_ART
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "mode": self.mode,
             "placement": self.placement,
             "dim_factor": self.dim_factor,
             "art": self.art,

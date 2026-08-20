@@ -98,6 +98,7 @@ if current != generate_reference_config():
 
 echo "[check] Checking the KWin script and its metadata..."
 node --check kwin/theater-detect/contents/code/main.js
+node tests/test_kwin_detector.js
 python3 -c 'import json; json.load(open("kwin/theater-detect/metadata.json"))'
 
 echo "[check] Checking GitHub Actions workflow YAML syntax..."

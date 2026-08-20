@@ -25,6 +25,7 @@ CLIENT="$BIN_DIR/theater-mode"
 CLIENT_ALIAS="$BIN_DIR/theatre-mode"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
+WANTS_LINK="$CONF_DIR/systemd/user/graphical-session.target.wants/theater-mode.service"
 KWIN_PLUGIN_ID="theater-detect"
 DOC="$DATA_DIR/theater-mode/README.md"
 REF_CONFIG="$DATA_DIR/theater-mode/config.reference.toml"
@@ -143,6 +144,12 @@ render_unit() {
 prune_package_copy() {
     rm -rf "$APP_DATA/lib/theater_mode/dimmer" "$APP_DATA/lib/theater_mode/art"
     find "$APP_DATA/lib/theater_mode" -type d -name __pycache__ -prune -exec rm -rf {} +
+}
+
+# Symlink directly into graphical-session.target.wants so headless installs activate at login.
+enable_unit() {
+    mkdir -p "${WANTS_LINK%/*}" || die "could not create ${WANTS_LINK%/*}"
+    ln -sfn "$UNIT" "$WANTS_LINK" || die "could not enable theater-mode.service"
 }
 
 # Persist the same KWin setting used by System Settings.
@@ -266,10 +273,17 @@ check_prerequisites() {
         printf "\n  Please install the missing dependencies with your package manager.\n" >&2
         exit 1
     fi
+}
 
-    # Check if target bin directory is in user PATH
-    if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+# Warn if theater-mode is not in PATH or is shadowed by an earlier executable.
+check_client_reachable() {
+    local found
+    hash -r 2>/dev/null || true
+    found="$(command -v theater-mode 2>/dev/null || true)"
+    if [ -z "$found" ]; then
         warn "$BIN_DIR is not in your PATH. You may need to add it to your ~/.bashrc or ~/.profile."
+    elif ! [ "$found" -ef "$CLIENT" ]; then
+        warn "$found comes earlier in your PATH and will shadow $CLIENT"
     fi
 }
 
@@ -376,6 +390,8 @@ sys.stdout.write(generate_reference_config())' > "$ref_tmp" \
         || { rm -f "$ref_tmp"; die "failed to generate $REF_CONFIG"; }
     mv -f "$ref_tmp" "$REF_CONFIG" || { rm -f "$ref_tmp"; die "could not write $REF_CONFIG"; }
 
+    check_client_reachable
+
     if [ "$SERVICE" -eq 0 ]; then
         cat <<EOF
 
@@ -385,6 +401,7 @@ Files are in place, but neither the service nor the KWin script was turned on:
   systemctl --user daemon-reload
   systemctl --user enable --now theater-mode.service
   kwriteconfig6 --file kwinrc --group Plugins --key ${KWIN_PLUGIN_ID}Enabled true
+  busctl --user call org.kde.KWin /KWin org.kde.KWin reconfigure
 
 Reference:     $REF_CONFIG
 EOF
@@ -395,7 +412,7 @@ EOF
         # Every file is already in place by now, so the update has succeeded whatever
         # systemd says. Without a running user session (ssh, no lingering) daemon-reload
         # fails; warn and leave the new files, rather than reporting a failed update.
-        local was_active=0
+        local was_active=0 restarted=0
         systemctl --user is-active --quiet theater-mode.service && was_active=1
         if ! systemctl --user daemon-reload 2>/dev/null; then
             warn "could not reach the systemd user session; files were updated but the"
@@ -404,19 +421,47 @@ EOF
             return 0
         fi
         if [ "$was_active" -eq 1 ]; then
-            systemctl --user restart theater-mode.service \
-                || warn "files updated, but theater-mode.service did not restart"
+            if systemctl --user restart theater-mode.service; then
+                restarted=1
+            else
+                warn "theater-mode files were updated, but the background service did not restart"
+                warn "Run 'theater-mode doctor' for a specific diagnosis."
+            fi
         fi
         notify_kwin_reconfigure
         echo
-        echo "theater-mode files updated; existing activation state was preserved."
+        if [ "$was_active" -eq 0 ]; then
+            echo "theater-mode files updated; the background service remains stopped."
+        elif [ "$restarted" -eq 1 ]; then
+            echo "theater-mode files updated; the background service restarted successfully."
+        else
+            echo "theater-mode files updated; the background service needs attention."
+        fi
         return 0
     fi
 
-    systemctl --user daemon-reload || die "systemctl --user daemon-reload failed"
-    systemctl --user enable theater-mode.service >/dev/null 2>&1 \
-        || die "could not enable theater-mode.service via systemctl --user"
-    systemctl --user restart theater-mode.service || die "could not start theater-mode.service via systemctl --user"
+    enable_unit
+
+    # Defer service start if no systemd user session is currently reachable (e.g. over SSH).
+    if ! systemctl --user daemon-reload 2>/dev/null; then
+        activate_kwin_script || true
+        cat <<EOF
+
+theater-mode is installed and enabled, but could not be started right now.
+
+No systemd user session was reachable, which is what happens over SSH or before you have
+logged in to the desktop. Everything is in place and it will start on its own at your next
+login. To start it now from a desktop session:
+
+  systemctl --user restart theater-mode.service
+
+Reference: $REF_CONFIG
+EOF
+        return 0
+    fi
+
+    systemctl --user restart theater-mode.service \
+        || die "theater-mode.service did not start; see journalctl --user -u theater-mode.service"
 
     if activate_kwin_script; then
         cat <<EOF
@@ -458,6 +503,7 @@ EOF
 do_uninstall() {
     echo "The following will be removed:"
     local targets=("$LIBEXEC_DIR" "$CLIENT" "$CLIENT_ALIAS" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA" \
+                   "$WANTS_LINK" \
                    "$BIN_DIR/theater-dimmer" "$BIN_DIR/theater-art" "$BIN_DIR/theater-moded")
     local found=0
     for t in "${targets[@]}"; do

@@ -10,10 +10,12 @@ HEADER = """\
 #
 # Resolution hierarchy: Built-in defaults -> System config -> User config.
 # User configuration path: ~/.config/theater-mode/config.toml
+# System configuration path: the first theater-mode/config.toml found in XDG_CONFIG_DIRS,
+# which defaults to /etc/xdg.
 #
 # To modify settings live via D-Bus without editing this file directly:
 #   theater-mode config set effect.dim_factor 0.75
-#   theater-mode config preview effect.mode log
+#   theater-mode config preview effect.placement behind_windows
 #"""
 
 

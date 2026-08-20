@@ -38,6 +38,9 @@ FAIL = "fail"
 
 _MARKS = {OK: "  ok  ", WARN: " warn ", FAIL: " FAIL "}
 
+# Threshold for reporting lost KWin detector contact (4 consecutive missed snapshots).
+DETECTOR_SILENCE_LIMIT = 60.0
+
 
 @dataclass(slots=True, frozen=True)
 class Check:
@@ -103,6 +106,7 @@ def _os_name() -> str:
 
 
 def _check_session(env: Mapping[str, str], run: Runner) -> list[Check]:
+    """Evaluate operating system, Wayland session type, desktop environment, and Plasma version."""
     section = "Session"
     checks = [Check(section, "Operating system", OK, _os_name())]
 
@@ -143,7 +147,7 @@ def _check_session(env: Mapping[str, str], run: Runner) -> list[Check]:
                 FAIL,
                 desktop,
                 "theater-mode runs in Desktop Mode, not Game Mode. "
-                "Switch to Desktop from the Steam Deck power menu.",
+                "Switch to Desktop Mode from the power menu.",
             )
         )
     elif "KDE" in desktop.upper():
@@ -163,16 +167,21 @@ def _check_session(env: Mapping[str, str], run: Runner) -> list[Check]:
     rc, out = run(["plasmashell", "--version"])
     if rc == 0 and out:
         version = out.split()[-1]
-        status = OK if version.startswith("6.") else WARN
-        hint = (
-            ""
-            if status == OK
-            else "theater-mode requires KDE Plasma 6. Earlier versions are not supported."
-        )
+        match = re.search(r"(\d+)\.(\d+)", version)
+        if match:
+            major, minor = int(match.group(1)), int(match.group(2))
+            is_supported = (major > 6) or (major == 6 and minor >= 2)
+            status = OK if is_supported else FAIL
+            hint = "" if status == OK else "theater-mode requires KDE Plasma 6.2 or newer."
+        else:
+            status = WARN
+            hint = "Could not parse Plasma version."
         checks.append(Check(section, "Plasma version", status, version, hint))
     else:
         checks.append(
-            Check(section, "Plasma version", WARN, "could not determine", "plasmashell not found.")
+            Check(
+                section, "Plasma version", WARN, "could not determine", "plasmashell was not found."
+            )
         )
 
     return checks
@@ -225,6 +234,7 @@ def _kwin_script_enabled(run: Runner) -> bool | None:
 
 
 def _check_installation(run: Runner) -> list[Check]:
+    """Verify helper binaries and KWin script presence and enablement."""
     from theater_mode.effects.dim import find_dimmer_binary
     from theater_mode.steam import find_art_binary
 
@@ -271,6 +281,7 @@ def _check_installation(run: Runner) -> list[Check]:
 
 
 def _check_service(run: Runner) -> list[Check]:
+    """Inspect systemd user service active status and login autostart enablement."""
     section = "Service"
     rc, active = run(["systemctl", "--user", "is-active", SERVICE_UNIT])
     if rc == -1:
@@ -312,6 +323,7 @@ def _check_service(run: Runner) -> list[Check]:
 
 
 def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
+    """Query daemon D-Bus responsiveness, helper process health, and detector contact."""
     section = "Daemon"
     status = _probe(call_dbus, "Status")
     checks = [
@@ -325,6 +337,51 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
             else f"The daemon is not responding. Try: systemctl --user restart {SERVICE_UNIT}",
         )
     ]
+
+    if status is not None:
+        try:
+            status_data = json.loads(status)
+            if status_data.get("affected_outputs") and not status_data.get(
+                "effect_process_running", False
+            ):
+                checks.append(
+                    Check(
+                        section,
+                        "Display effect helper",
+                        FAIL,
+                        "not running",
+                        "The Wayland dimmer helper is not running while the effect is active. "
+                        "It retries automatically; if this persists, restart the service.",
+                    )
+                )
+
+            silence = status_data.get("detector_silence_seconds", 0.0)
+            if silence > DETECTOR_SILENCE_LIMIT:
+                checks.append(
+                    Check(
+                        section,
+                        "KWin detector contact",
+                        FAIL,
+                        f"silent for {silence}s",
+                        "The KWin detector script is not reporting windows. Reload it with: "
+                        "busctl --user call org.kde.KWin /KWin org.kde.KWin reconfigure",
+                    )
+                )
+            else:
+                checks.append(
+                    Check(section, "KWin detector contact", OK, f"active ({silence}s ago)")
+                )
+        except (TypeError, ValueError):
+            checks.append(
+                Check(
+                    section,
+                    "Status report",
+                    FAIL,
+                    "unreadable",
+                    "The daemon answered with a status this version cannot read. "
+                    f"Try: systemctl --user restart {SERVICE_UNIT}",
+                )
+            )
 
     # Configuration diagnostics: query online daemon, or fall back to offline parser
     raw = _probe(call_dbus, "GetDiagnostics") if status is not None else None
@@ -428,6 +485,7 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
 
 
 def _check_artwork() -> list[Check]:
+    """Verify accessibility of Steam library caches and the rendered artwork cache directory."""
     section = "Artwork"
     checks: list[Check] = []
 
@@ -512,6 +570,7 @@ def format_report(checks: list[Check]) -> str:
 
 
 def to_json(checks: list[Check]) -> str:
+    """Serialize diagnostic checks as a JSON string."""
     return json.dumps(
         [
             {
@@ -528,4 +587,5 @@ def to_json(checks: list[Check]) -> str:
 
 
 def exit_code(checks: list[Check]) -> int:
+    """Return 1 if any check failed, or 0 when all checks pass or only warn."""
     return 1 if any(c.status == FAIL for c in checks) else 0

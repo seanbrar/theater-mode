@@ -101,7 +101,6 @@ INTERFACE_XML = f"""
       <arg type='s' name='pid' direction='in'/>
       <arg type='s' name='output' direction='in'/>
       <arg type='s' name='fullscreen' direction='in'/>
-      <arg type='s' name='normal' direction='in'/>
     </method>
     <method name='WindowChanged'>
       <arg type='s' name='window_id' direction='in'/>

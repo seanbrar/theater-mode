@@ -77,7 +77,7 @@ class TestDimCommands(DimEffectTestCase):
 
         self.assertEqual(
             [call.args for call in self.build_artwork.call_args_list],
-            [("1245620", 1920, 1080, 0.85), ("1245620", 1920, 1080, 0.85)],
+            [("1245620", 1920, 1080, 0.85)],
         )
 
     def test_dim_factor_is_part_of_the_artwork_request(self) -> None:
@@ -284,6 +284,26 @@ class TestHelperLifecycle(DimEffectTestCase):
         self.process.stdout.readline.assert_not_called()
         self.assertIs(self.popen.call_args.kwargs["stdout"], subprocess.DEVNULL)
         self.assertNotIn("stderr", self.popen.call_args.kwargs)
+
+    def test_apply_reports_success_and_failure(self) -> None:
+        effect = DimEffect(art=False)
+        self.assertTrue(effect.apply("DP-1", ["DP-2"], "1245620"))
+
+        dead = make_process()
+        dead.stdin.write.side_effect = BrokenPipeError("gone")
+        self.popen.return_value = dead
+        broken_effect = DimEffect(art=False)
+        self.assertFalse(broken_effect.apply("DP-1", ["DP-2"], "1245620"))
+
+    def test_is_running_reports_process_state(self) -> None:
+        effect = DimEffect(art=False)
+        self.assertFalse(effect.is_running)
+
+        effect.apply("DP-1", ["DP-2"], "1245620")
+        self.assertTrue(effect.is_running)
+
+        self.process.poll.return_value = 1
+        self.assertFalse(effect.is_running)
 
     def test_broken_pipe_logs_error_and_cleans_up(self) -> None:
         dead = make_process()

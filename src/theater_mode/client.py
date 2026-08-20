@@ -49,6 +49,13 @@ def _call_dbus_method(method_name: str, *args: Any) -> str:
 RULE = " " + "-" * 77
 
 
+def _display_value(value: Any) -> str:
+    """Format values using TOML spelling (e.g. lowercase booleans)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
 def _format_provenance_table(config_data: dict[str, Any]) -> str:
     """Format the resolved configuration and its provenance into a human-readable table."""
     provenance = config_data.get("provenance", {})
@@ -58,7 +65,8 @@ def _format_provenance_table(config_data: dict[str, Any]) -> str:
         prov = provenance.get(key_path, {})
         file_src, line = prov.get("file"), prov.get("line")
         source = f"{file_src}:{line}" if file_src and line else (file_src or "-")
-        return f" {key_path:<32} {str(value):<20} {prov.get('layer', default_layer):<10} {source}"
+        rendered = _display_value(value)
+        return f" {key_path:<32} {rendered:<20} {prov.get('layer', default_layer):<10} {source}"
 
     lines: list[str] = [
         " theater-mode Resolved Configuration",
@@ -334,7 +342,7 @@ def main(
                     file=sys.stderr,
                 )
                 return 1
-            print(json.dumps(value, indent=2) if isinstance(value, dict) else value)
+            print(json.dumps(value, indent=2) if isinstance(value, dict) else _display_value(value))
 
         case "config", "set" | "preview" as sub:
             method = "Commit" if sub == "set" else "Preview"
@@ -354,7 +362,7 @@ def main(
             for key in args.keys:
                 value = _lookup(resolved, key)
                 if value is not _MISSING and not isinstance(value, dict):
-                    print(f"  {key} is now {value}")
+                    print(f"  {key} is now {_display_value(value)}")
 
         case "config", "revert-preview":
             print(call_dbus("RevertPreview"))

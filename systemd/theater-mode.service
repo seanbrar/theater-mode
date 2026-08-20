@@ -4,7 +4,9 @@ PartOf=graphical-session.target
 After=plasma-workspace.target
 
 [Service]
-Type=simple
+Type=dbus
+BusName=com.seanbrar.TheaterMode
+TimeoutStartSec=15s
 # All settings live in ~/.config/theater-mode/config.toml.
 # Inspect or change them with `theater-mode config show` / `theater-mode config set`.
 # @DAEMON@ is rendered by install.sh with the installed daemon path.

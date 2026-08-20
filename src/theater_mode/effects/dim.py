@@ -110,6 +110,7 @@ class DimEffect(Effect):
         return True
 
     def _running(self) -> bool:
+        """Report whether the helper subprocess is currently active."""
         return self._process is not None and self._process.poll() is None
 
     def _close_process(self) -> None:
@@ -202,12 +203,23 @@ class DimEffect(Effect):
                 " -> " + ", ".join(deltas) if deltas else " (no change from global settings)",
             )
 
+    @property
     @override
-    def apply(self, game_output: str, other_outputs: list[str], appid: str) -> None:
+    def is_running(self) -> bool:
+        """Report whether the dimmer helper process is currently alive."""
+        return self._running()
+
+    @override
+    def apply(self, game_output: str, other_outputs: list[str], appid: str) -> bool:
+        """Dispatch effect state to the dimmer helper.
+
+        True means the helper accepted every command through its pipe, not that the
+        compositor acknowledged the resulting Wayland state.
+        """
         if not other_outputs:
             log.info("no secondary outputs to dim")
             self.revert()
-            return
+            return True
 
         targets = sorted(other_outputs)
         # Read connector EDID once so [outputs.<make:model:serial>] rules can match.
@@ -227,18 +239,24 @@ class DimEffect(Effect):
         sizes = output_modes() if any(s.art for s in settings.values()) else {}
 
         with_art: list[str] = []
+        artwork_requests: dict[tuple[str, int, int, float], Path | None] = {}
         for output in targets:
             resolved = settings[output]
             # Re-sent every time: a helper that has restarted comes back at its default.
-            self._send(self.layer_command(output, resolved.placement))
+            if not self._send(self.layer_command(output, resolved.placement)):
+                return False
             output_size = sizes.get(output) if resolved.art else None
             render_size = artwork_render_size(*output_size) if output_size else None
-            artwork = (
-                build_artwork(appid, *render_size, resolved.dim_factor)
-                if appid and render_size
-                else None
-            )
-            self._send(self.art_command(output, artwork, render_size))
+            artwork = None
+            if appid and render_size:
+                request = (appid, *render_size, resolved.dim_factor)
+                if request not in artwork_requests:
+                    artwork_requests[request] = build_artwork(
+                        appid, *render_size, resolved.dim_factor
+                    )
+                artwork = artwork_requests[request]
+            if not self._send(self.art_command(output, artwork, render_size)):
+                return False
             if artwork is not None:
                 with_art.append(output)
 
@@ -248,7 +266,7 @@ class DimEffect(Effect):
         joined = ",".join(targets)
         batched = f"DIM {joined} {self._dim_factor:.3f} {self._duration:.2f} {self._curve}"
         if not self._send(batched):
-            return
+            return False
         self._dimmed = True
 
         globals_ = (self._dim_factor, self._duration, self._curve)
@@ -256,10 +274,11 @@ class DimEffect(Effect):
             resolved = settings[output]
             if (resolved.dim_factor, resolved.duration, resolved.curve) == globals_:
                 continue
-            self._send(
+            if not self._send(
                 f"DIM_OUTPUT {output} {resolved.dim_factor:.3f}"
                 f" {resolved.duration:.2f} {resolved.curve}"
-            )
+            ):
+                return False
 
         log.info(
             "cinematic dimming on [%s] (factor=%.2f, duration=%.1fs, curve=%s, placement=%s,"
@@ -272,9 +291,11 @@ class DimEffect(Effect):
             ", ".join(with_art) or "none",
         )
         self._log_output_rules(targets, settings)
+        return True
 
     @override
     def revert(self, immediate: bool = False) -> None:
+        """Fade out dimming overlays and restore secondary displays."""
         if not self._dimmed and not self._running():
             return
 

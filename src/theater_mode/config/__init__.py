@@ -9,6 +9,7 @@ from theater_mode.config.loader import (
     load_resolved_config,
     lookup_spec,
     split_key_path,
+    system_config_dirs,
     validate_updates,
 )
 from theater_mode.config.provenance import Diagnostic, Layer, Provenance
@@ -50,6 +51,7 @@ __all__ = [
     "load_resolved_config",
     "lookup_spec",
     "split_key_path",
+    "system_config_dirs",
     "unset_user_config",
     "update_toml_content",
     "validate_updates",

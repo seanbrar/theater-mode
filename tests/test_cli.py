@@ -8,9 +8,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from theater_mode.cli import parse_args as parse_daemon_args
+from theater_mode.cli import (
+    main as daemon_main,
+)
+from theater_mode.cli import (
+    parse_args as parse_daemon_args,
+)
 from theater_mode.client import (
     _MISSING,
+    _display_value,
     _format_diagnostics,
     _format_outputs,
     _format_provenance_table,
@@ -20,13 +26,27 @@ from theater_mode.client import (
 from theater_mode.client import (
     main as client_main,
 )
-from theater_mode.effects import EFFECTS
 from theater_mode.effects.base import EffectOptions
 from theater_mode.effects.dim import DimEffect
-from theater_mode.effects.log import LogEffect
 
 
 class TestCLI(unittest.TestCase):
+    def test_daemon_main_exits_nonzero_on_name_lost(self) -> None:
+        with (
+            patch("gi.repository.Gio.bus_own_name") as mock_bus_own,
+            patch("gi.repository.GLib.MainLoop.run"),
+            patch("theater_mode.cli.logging.basicConfig"),
+            patch("theater_mode.cli.log.error"),
+        ):
+
+            def trigger_lost(*args, **kwargs):
+                on_name_lost = mock_bus_own.call_args[0][5]
+                on_name_lost()
+
+            mock_bus_own.side_effect = trigger_lost
+            result = daemon_main([])
+            self.assertEqual(result, 1)
+
     def _run_client(self, argv: list[str], response: str) -> tuple[int, str, str, MagicMock]:
         call_dbus = MagicMock(return_value=response)
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -57,15 +77,11 @@ class TestCLI(unittest.TestCase):
     def test_effects_are_built_from_options(self) -> None:
         options = EffectOptions(dim_factor=0.5, dim_duration=9.0, dim_curve="quad", art=False)
 
-        effect = EFFECTS["dim"].create(options)
-        self.assertIsInstance(effect, DimEffect)
+        effect = DimEffect.create(options)
         self.assertEqual(effect._dim_factor, 0.5)
         self.assertEqual(effect._duration, 9.0)
         self.assertEqual(effect._curve, "quad")
         self.assertFalse(effect._art)
-
-        # Effects without settings ignore the options entirely.
-        self.assertIsInstance(EFFECTS["log"].create(options), LogEffect)
 
     def test_client_parse_cli_value(self) -> None:
         self.assertEqual(_parse_cli_value("true"), True)
@@ -109,6 +125,44 @@ class TestCLI(unittest.TestCase):
         diag_output = _format_diagnostics(diags)
         self.assertIn("Value 1.5 exceeds maximum 1.0", diag_output)
         self.assertIn("/tmp/test.toml:3", diag_output)
+
+    def test_booleans_render_in_toml_spelling(self) -> None:
+        """Verify boolean formatting matches TOML lowercase spelling."""
+        self.assertEqual(_display_value(True), "true")
+        self.assertEqual(_display_value(False), "false")
+        # Everything else keeps its plain representation.
+        self.assertEqual(_display_value("dim"), "dim")
+        self.assertEqual(_display_value(0.85), "0.85")
+        self.assertEqual(_display_value(3), "3")
+
+    def test_provenance_table_shows_toml_booleans(self) -> None:
+        table = _format_provenance_table(
+            {
+                "effect": {"art": True},
+                "daemon": {"require_fullscreen": False},
+                "outputs": {"DP-1": {"art": False}},
+                "provenance": {},
+            }
+        )
+        self.assertNotIn("True", table)
+        self.assertNotIn("False", table)
+        self.assertIn("true", table)
+        self.assertIn("false", table)
+
+    def test_config_get_prints_toml_booleans(self) -> None:
+        raw = '{"effect": {"art": true}, "daemon": {"require_fullscreen": false}}'
+        result, stdout, _, _ = self._run_client(["config", "get", "effect.art"], raw)
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.strip(), "true")
+
+        result, stdout, _, _ = self._run_client(["config", "get", "daemon.require_fullscreen"], raw)
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.strip(), "false")
+
+    def test_config_get_output_round_trips_through_config_set(self) -> None:
+        """Verify config get output round-trips through config set."""
+        for value in (True, False):
+            self.assertIs(_parse_cli_value(_display_value(value)), value)
 
     def test_client_lookup_handles_output_ids_containing_dots(self) -> None:
         edid = "Dell Inc.:DELL S2721QS:4QCPZY3"

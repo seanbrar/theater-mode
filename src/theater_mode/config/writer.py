@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -70,7 +71,7 @@ def _trailing_comment(text: str) -> str:
 def update_toml_content(original_content: str, updates: dict[str, Any]) -> str:
     """Update TOML text in place, preserving existing comments, whitespace, and ordering.
 
-    updates maps a full key path ('effect.mode', 'outputs.DP-1.dim_factor') to a new value.
+    updates maps a full key path ('effect.placement', 'outputs.DP-1.dim_factor') to a new value.
     """
     table_updates: dict[str, dict[str, str]] = {}
     for key_path, raw_val in updates.items():
@@ -215,6 +216,11 @@ def unset_user_config(
     if not removed:
         return True, f"No matching keys in {target_path}", set()
 
+    try:
+        tomllib.loads(updated_text)
+    except tomllib.TOMLDecodeError as e:
+        return False, f"Updated configuration contains invalid TOML syntax: {e}", set()
+
     ok, msg = _write_atomically(target_path, updated_text)
     return ok, msg, removed if ok else set()
 
@@ -228,7 +234,10 @@ def commit_user_config(
     Returns (success, message).
     """
     target_path = user_config_path or get_default_user_path()
-    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return False, f"Failed to create directory {target_path.parent}: {e}"
 
     original_text = ""
     if target_path.is_file():
@@ -238,4 +247,9 @@ def commit_user_config(
             return False, f"Failed to read existing config at {target_path}: {e}"
 
     updated_text = update_toml_content(original_text, updates)
+    try:
+        tomllib.loads(updated_text)
+    except tomllib.TOMLDecodeError as e:
+        return False, f"Updated configuration contains invalid TOML syntax: {e}"
+
     return _write_atomically(target_path, updated_text)

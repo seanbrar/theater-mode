@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from theater_mode.config import (
     ConfigLoader,
@@ -13,7 +15,10 @@ from theater_mode.config import (
     Layer,
     commit_user_config,
     generate_reference_config,
+    get_default_system_path,
     load_resolved_config,
+    system_config_dirs,
+    unset_user_config,
     update_toml_content,
     validate_updates,
 )
@@ -38,7 +43,6 @@ class TestConfig(unittest.TestCase):
         config, diagnostics = load_resolved_config(dev_config=dev)
 
         self.assertEqual(len(diagnostics), 0)
-        self.assertEqual(config.effect.mode, "dim")
         self.assertEqual(config.effect.placement, "over_windows")
         self.assertEqual(config.effect.dim_factor, 0.85)
         self.assertTrue(config.effect.art)
@@ -207,7 +211,6 @@ dim_factor = "missing closing bracket
             """
 [effect]
 dim_factor = 1.50
-mode = "invalid_effect"
 placement = "invalid_placement"
 
 [transition]
@@ -223,10 +226,9 @@ duration = -5.0
         )
         config, diagnostics = load_resolved_config(dev_config=dev)
 
-        self.assertEqual(len(diagnostics), 5)
+        self.assertEqual(len(diagnostics), 4)
         # Should fallback to defaults
         self.assertEqual(config.effect.dim_factor, 0.85)
-        self.assertEqual(config.effect.mode, "dim")
         self.assertEqual(config.effect.placement, "over_windows")
         self.assertEqual(config.transition.curve, "sine")
         self.assertEqual(config.transition.duration, 2.0)
@@ -257,7 +259,7 @@ duration = -5.0
         """Test atomic comment-preserving updates."""
         original = """# My awesome theater mode config
 [effect]
-mode = "dim"
+placement = "over_windows"
 dim_factor = 0.85  # Keep this comment
 
 [daemon]
@@ -286,17 +288,41 @@ revert_delay = 3.0
         self.assertEqual(parsed["transition"]["duration"], 1.5)
         self.assertEqual(parsed["outputs"]["DP-1"]["dim_factor"], 0.30)
 
+    def test_commit_user_config_validates_toml_syntax(self) -> None:
+        self.user_path.write_text("[effect]\ninvalid toml syntax = ", encoding="utf-8")
+        ok, msg = commit_user_config({"effect.dim_factor": 0.5}, self.user_path)
+        self.assertFalse(ok)
+        self.assertIn("invalid TOML syntax", msg)
+        self.assertEqual(
+            self.user_path.read_text(encoding="utf-8"), "[effect]\ninvalid toml syntax = "
+        )
+
+    def test_commit_user_config_handles_directory_creation_failure(self) -> None:
+        with patch("pathlib.Path.mkdir", side_effect=OSError("Permission denied")):
+            ok, msg = commit_user_config({"effect.dim_factor": 0.5}, self.user_path)
+            self.assertFalse(ok)
+            self.assertIn("Failed to create directory", msg)
+
+    def test_unset_user_config_validates_toml_syntax(self) -> None:
+        self.user_path.write_text(
+            "[effect]\ndim_factor = 0.5\ninvalid toml syntax = ", encoding="utf-8"
+        )
+        ok, msg, removed = unset_user_config({"effect.dim_factor"}, self.user_path)
+        self.assertFalse(ok)
+        self.assertIn("invalid TOML syntax", msg)
+        self.assertEqual(removed, set())
+
     def test_commit_user_config_file(self) -> None:
         """Test writing user config to disk atomically."""
         ok, _ = commit_user_config(
-            {"effect.mode": "log", "effect.dim_factor": 0.5},
+            {"effect.placement": "behind_windows", "effect.dim_factor": 0.5},
             user_config_path=self.user_path,
         )
         self.assertTrue(ok)
         self.assertTrue(self.user_path.is_file())
 
         parsed = tomllib.loads(self.user_path.read_text(encoding="utf-8"))
-        self.assertEqual(parsed["effect"]["mode"], "log")
+        self.assertEqual(parsed["effect"]["placement"], "behind_windows")
         self.assertEqual(parsed["effect"]["dim_factor"], 0.5)
 
     def test_writer_quotes_non_bare_output_ids(self) -> None:
@@ -337,14 +363,14 @@ revert_delay = 3.0
 
     def test_writer_keeps_new_keys_inside_their_own_table(self) -> None:
         updated = update_toml_content(
-            '[effect]\nmode = "dim"\n\n# daemon settings\n[daemon]\nrevert_delay = 3.0\n',
+            '[effect]\nplacement = "over_windows"\n\n# daemon settings\n[daemon]\nrevert_delay = 3.0\n',
             {"effect.dim_factor": 0.5},
         )
         self.assertEqual(
             updated.splitlines(),
             [
                 "[effect]",
-                'mode = "dim"',
+                'placement = "over_windows"',
                 "dim_factor = 0.5",
                 "",
                 "# daemon settings",
@@ -371,11 +397,65 @@ revert_delay = 3.0
                 "effect.dim_factor_typo": 0.5,
                 "transition.duration": 999.0,
                 "outputs.DP-1.revert_delay": 1.0,
-                "effect.mode": "DIM",
+                "effect.placement": "BEHIND_WINDOWS",
             }
         )
-        self.assertEqual(accepted, {"effect.dim_factor": 0.5, "effect.mode": "dim"})
+        self.assertEqual(accepted, {"effect.dim_factor": 0.5, "effect.placement": "behind_windows"})
         self.assertEqual(len(rejected), 3)
+
+    def test_system_layer_searches_xdg_config_dirs_in_order(self) -> None:
+        """Verify system config resolution searches XDG_CONFIG_DIRS in order."""
+        first = self.dir_path / "kdedefaults"
+        second = self.dir_path / "etc-xdg"
+        for directory in (first, second):
+            (directory / "theater-mode").mkdir(parents=True)
+        first_file = first / "theater-mode" / "config.toml"
+        second_file = second / "theater-mode" / "config.toml"
+
+        with patch.dict(os.environ, {"XDG_CONFIG_DIRS": f"{first}:{second}"}):
+            # Default to first directory when no config file exists.
+            self.assertEqual(get_default_system_path(), first_file)
+
+            # Pick file found later in search path.
+            second_file.write_text("[effect]\ndim_factor = 0.25\n")
+            self.assertEqual(get_default_system_path(), second_file)
+
+            # Earlier entry in search path takes precedence.
+            first_file.write_text("[effect]\ndim_factor = 0.9\n")
+            self.assertEqual(get_default_system_path(), first_file)
+
+    def test_system_config_dirs_normalisation(self) -> None:
+        cases = {
+            "": ["/etc/xdg"],
+            "/a:/b": ["/a", "/b"],
+            "/a::/b": ["/a", "/b"],
+            "relative:/b": ["/b"],
+            "relative": ["/etc/xdg"],
+            ":": ["/etc/xdg"],
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value), patch.dict(os.environ, {"XDG_CONFIG_DIRS": value}):
+                self.assertEqual([str(p) for p in system_config_dirs()], expected)
+
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual([str(p) for p in system_config_dirs()], ["/etc/xdg"])
+
+    def test_system_layer_found_later_in_the_path_is_actually_applied(self) -> None:
+        """Verify config loaded from secondary XDG_CONFIG_DIRS has system provenance."""
+        first = self.dir_path / "kdedefaults"
+        second = self.dir_path / "etc-xdg"
+        for directory in (first, second):
+            (directory / "theater-mode").mkdir(parents=True)
+        (second / "theater-mode" / "config.toml").write_text("[effect]\ndim_factor = 0.25\n")
+
+        with patch.dict(os.environ, {"XDG_CONFIG_DIRS": f"{first}:{second}"}):
+            config, diagnostics = load_resolved_config(
+                dev_config=DevConfig(user_config_override=self.user_path)
+            )
+
+        self.assertEqual(diagnostics, [])
+        self.assertEqual(config.effect.dim_factor, 0.25)
+        self.assertEqual(config.provenance["effect.dim_factor"].layer, Layer.SYSTEM)
 
     def test_reference_config_generation(self) -> None:
         """Test that generated reference config is valid TOML and has no dev keys."""
@@ -387,7 +467,7 @@ revert_delay = 3.0
 
         # Verify it parses cleanly
         parsed = tomllib.loads(ref)
-        self.assertEqual(parsed["effect"]["mode"], "dim")
+        self.assertEqual(parsed["effect"]["dim_factor"], 0.85)
 
 
 if __name__ == "__main__":

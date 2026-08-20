@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from theater_mode.config import DaemonConfig, DevConfig, ResolvedConfig
 from theater_mode.daemon import Daemon
@@ -73,14 +74,14 @@ class TestDaemon(unittest.TestCase):
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2", "DP-3"})
     def test_non_game_window(self, _) -> None:
-        self.daemon.window_opened("win-1", "firefox", "100", "DP-1", "false", "true")
+        self.daemon.window_opened("win-1", "firefox", "100", "DP-1", "false")
         self.assertEqual(len(self.daemon.windows), 1)
         self.assertIsNone(self.daemon.active_output)
         self.mock_effect.apply.assert_not_called()
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2", "DP-3"})
     def test_game_window_open_and_close(self, _) -> None:
-        self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true", "true")
+        self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
         self.assertEqual(self.daemon.active_output, "DP-1")
         self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2", "DP-3"], "1671210")
 
@@ -288,6 +289,63 @@ class TestDaemon(unittest.TestCase):
         self.mock_effect.revert.assert_not_called()
         self.assertEqual(self.mock_effect.apply.call_count, 1)
         self.assertEqual(daemon.active_output, "DP-1")
+
+    def test_commit_stage_rolls_back_on_apply_failure(self) -> None:
+        self.mock_effect.apply.return_value = False
+        self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
+        self.assertIsNone(self.daemon.active_output)
+        self.assertIsNone(self.daemon._applied_others)
+
+    def test_reconcile_recovers_when_effect_helper_dies(self) -> None:
+        self.mock_effect.apply.return_value = True
+        type(self.mock_effect).is_running = PropertyMock(return_value=True)
+        self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
+        self.assertEqual(self.daemon.active_output, "DP-1")
+        self.assertEqual(self.mock_effect.apply.call_count, 1)
+
+        # Helper dies unexpectedly while game is still open on DP-1
+        type(self.mock_effect).is_running = PropertyMock(return_value=False)
+        self.daemon.reconcile()
+        # Should detect dead helper and re-apply
+        self.assertEqual(self.mock_effect.apply.call_count, 2)
+
+    @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1"})
+    def test_single_display_does_not_require_an_effect_process(self, _) -> None:
+        self.mock_effect.apply.return_value = True
+        type(self.mock_effect).is_running = PropertyMock(return_value=False)
+
+        self.daemon.window_opened("win-game", "steam_app_100", "200", "DP-1", "true")
+        self.daemon.reconcile()
+
+        self.mock_effect.apply.assert_called_once_with("DP-1", [], "100")
+        status = json.loads(self.daemon.status())
+        self.assertEqual(status["affected_outputs"], [])
+        self.assertFalse(status["effect_process_running"])
+
+    @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
+    def test_snapshot_reconciles_once_after_all_windows_arrive(self, _) -> None:
+        self.daemon.snapshot_begin()
+        self.daemon.window_opened("browser", "firefox", "100", "DP-2", "false")
+        self.daemon.window_opened("game", "steam_app_100", "200", "DP-1", "true")
+        self.mock_effect.apply.assert_not_called()
+
+        self.daemon.snapshot_end()
+
+        self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2"], "100")
+
+    def test_status_counts_detector_silence_from_startup(self) -> None:
+        # Silence is measured from daemon start to avoid false alarms on restart.
+        def silence() -> float:
+            return json.loads(self.daemon.status())["detector_silence_seconds"]
+
+        self.assertLess(silence(), 60.0)
+
+        self.daemon._detector_contact -= 300.0
+        self.assertGreater(silence(), 60.0)
+
+        self.daemon.snapshot_begin()
+        self.daemon.snapshot_end()
+        self.assertLess(silence(), 60.0)
 
 
 if __name__ == "__main__":

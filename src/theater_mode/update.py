@@ -219,5 +219,5 @@ def apply(stream=sys.stdout) -> int:
             raise UpdateError("the downloaded release has an unexpected layout")
         _run_installer(roots[0])
 
-    print(f"theater-mode is now at {release.version}.", file=stream)
+    print(f"theater-mode {release.version} files are installed.", file=stream)
     return 0

@@ -80,9 +80,10 @@ Before committing, run the same repository-wide entry point used by CI:
 ./bin/check
 ```
 
-It builds `theater-dimmer` with warnings treated as errors, verifies its version and ABI
-floor, checks the generated configuration reference and KWin JavaScript, runs ShellCheck
-and all unit tests, then checks Python linting and formatting with Ruff.
+It builds `theater-dimmer` and `theater-art` with warnings treated as errors, verifies
+their version and ABI floor, runs ASan/UBSan unit tests and oracle verification, checks
+the generated configuration reference and KWin JavaScript, runs ShellCheck and all unit
+tests, then checks Python linting and formatting with Ruff.
 
 ### Live Plasma testing
 
@@ -93,19 +94,19 @@ toolchain installed, reinstall directly from the checkout:
 ./install.sh
 ```
 
-On an atomic host, do not run that command first: the checkout has no prebuilt dimmer and
+On an atomic host, do not run that command first: the checkout has no prebuilt helpers and
 the host intentionally lacks the compiler toolchain. Build in Distrobox, then activate
 the result from a host terminal:
 
 ```bash
-distrobox enter theater-mode-dev -- make -C src/theater_mode/dimmer
-./install.sh --dimmer-bin=src/theater_mode/dimmer/theater-dimmer
+distrobox enter theater-mode-dev -- sh -c 'make -C src/theater_mode/dimmer && make -C src/theater_mode/art'
+./install.sh --dimmer-bin=src/theater_mode/dimmer/theater-dimmer --art-bin=src/theater_mode/art/theater-art
 ```
 
 The second command must run on the host. Although the container shares `~/.local`, it does
 not have the host's KDE configuration tools or session bus and therefore cannot reliably
 enable the KWin script or restart the host service. Running `./bin/check` in Distrobox also
-builds and verifies the dimmer, so it can replace the first command.
+builds and verifies both helpers, so it can replace the first command.
 
 For either path, verify the daemon and follow its logs:
 
@@ -218,6 +219,7 @@ We follow a **Modern Markdown Git style**: concise, imperative subjects with a b
 | `tests:` | Unit tests, mocks, and fixtures |
 | `tools:` | Developer tools, `bin/check`, Ruff linting/formatting configs |
 | `docs:` | User, contributor, and inline documentation |
+| `art:` | Native C artwork scaling and compositing pipeline |
 
 ### Commit Body Guidelines
 

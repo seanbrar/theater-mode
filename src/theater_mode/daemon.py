@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -71,7 +72,6 @@ class TrackedWindow:
     output: str
     fullscreen: bool
     appid: str | None = None
-    normal: bool = True
 
     @property
     def is_game(self) -> bool:
@@ -99,6 +99,8 @@ class Daemon:
         self.windows: dict[str, TrackedWindow] = {}
         self.active_output: str | None = None
         self._applied_others: list[str] | None = None
+        # Track time since last detector snapshot (seeded at start for silence calculations).
+        self._detector_contact: float = time.monotonic()
         self._snapshot: set[str] | None = None
         self._pending_revert: Any | None = None
         self._pending_stage: Any | None = None
@@ -152,6 +154,10 @@ class Daemon:
         if stage is None:
             return
         if stage.output == self.active_output:
+            if self._applied_others and not self.effect.is_running:
+                log.info("display effect helper exited unexpectedly; re-applying")
+                self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
+                return
             self._cancel_pending_stage()
             self._follow_output_changes(stage)
             return
@@ -188,6 +194,7 @@ class Daemon:
         self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
 
     def _other_outputs(self, game_output: str) -> list[str]:
+        """Return all secondary outputs given the active game output, sorted."""
         return sorted({o for o in self.all_outputs() if o != game_output})
 
     def _stage(self, games: list[TrackedWindow]) -> TrackedWindow | None:
@@ -208,8 +215,8 @@ class Daemon:
         self.effect.revert()
         self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
 
-    def _commit_stage(self, output: str, appid: str, resource_class: str) -> None:
-        """Commit effect application to target output."""
+    def _commit_stage(self, output: str, appid: str, resource_class: str) -> bool:
+        """Commit effect application to the target output, returning whether dispatch succeeded."""
         others = self._other_outputs(output)
         log.info(
             "game detected: appid=%s class=%s on %s (other outputs: %s)",
@@ -218,9 +225,17 @@ class Daemon:
             output,
             ", ".join(others) or "none",
         )
-        self.effect.apply(output, others, appid)
+        if not self.effect.apply(output, others, appid):
+            log.warning(
+                "failed to apply display effect on %s; will retry on next reconcile", output
+            )
+            self.active_output = None
+            self._applied_others = None
+            return False
+
         self.active_output = output
         self._applied_others = others
+        return True
 
     def _cancel_pending_stage(self) -> None:
         if self._pending_stage is not None:
@@ -259,11 +274,10 @@ class Daemon:
         pid: str | int,
         output: str,
         fullscreen: str | bool,
-        normal: str | bool = "true",
     ) -> None:
+        """Handle window open event from KWin detector script."""
         parsed_pid = parse_int(pid)
         is_fullscreen = parse_bool(fullscreen)
-        is_normal = parse_bool(normal)
 
         known = self.windows.get(window_id)
         if known is not None and (known.pid, known.resource_class) == (parsed_pid, resource_class):
@@ -278,7 +292,6 @@ class Daemon:
             output=output,
             fullscreen=is_fullscreen,
             appid=appid,
-            normal=is_normal,
         )
 
         self.windows[window_id] = window
@@ -295,16 +308,18 @@ class Daemon:
             )
         else:
             log.debug(
-                "window opened: class=%s pid=%d on %s normal=%s fullscreen=%s (not a game)",
+                "window opened: class=%s pid=%d on %s fullscreen=%s (not a game)",
                 resource_class,
                 parsed_pid,
                 output,
-                is_normal,
                 is_fullscreen,
             )
-        self.reconcile()
+        # Defer reconciliation during a snapshot until snapshot_end runs.
+        if self._snapshot is None:
+            self.reconcile()
 
     def window_changed(self, window_id: str, output: str, fullscreen: str | bool) -> None:
+        """Handle window output or fullscreen geometry change from KWin detector script."""
         window = self.windows.get(window_id)
         if window is None:
             log.debug("change for untracked window %s; ignoring", window_id)
@@ -319,18 +334,23 @@ class Daemon:
                 output,
                 fullscreen,
             )
-        self.reconcile()
+        if self._snapshot is None:
+            self.reconcile()
 
     def window_closed(self, window_id: str) -> None:
+        """Handle window close event from KWin detector script."""
         window = self.windows.pop(window_id, None)
         if window and window.is_game:
             log.info("game window closed: appid=%s", window.appid)
-        self.reconcile()
+        if self._snapshot is None:
+            self.reconcile()
 
     def snapshot_begin(self) -> None:
+        """Begin full window pass from KWin detector script, tracking active window IDs."""
         self._snapshot = set()
 
     def snapshot_end(self) -> None:
+        """Complete full window pass from KWin detector script and drop untracked stale windows."""
         if self._snapshot is None:
             return
         stale = set(self.windows) - self._snapshot
@@ -338,14 +358,17 @@ class Daemon:
             window = self.windows.pop(window_id)
             log.info("dropping stale window from snapshot: class=%s", window.resource_class)
         self._snapshot = None
-        if stale:
-            self.reconcile()
+        self._detector_contact = time.monotonic()
+        self.reconcile()
 
     def status(self) -> str:
         """Return JSON summary of current daemon state and tracked windows."""
         return json.dumps(
             {
                 "effect": self.effect.name,
+                "effect_process_running": bool(self.effect.is_running),
+                "affected_outputs": list(self._applied_others or []),
+                "detector_silence_seconds": round(time.monotonic() - self._detector_contact, 1),
                 "active_output": self.active_output,
                 "revert_pending": self._pending_revert is not None,
                 "revert_delay": self.revert_delay,
@@ -372,10 +395,10 @@ class Daemon:
         fake_id = f"simulated-{appid}"
         self.windows[fake_id] = TrackedWindow(fake_id, f"steam_app_{appid}", 0, output, True, appid)
         self.reconcile()
-        return f"simulated game {appid} on {output}; call Clear to undo"
+        return f"simulated game {appid} on {output}; run 'theater-mode clear' to undo"
 
     def clear(self, immediate: bool = False) -> str:
-        """Clear all window tracking and force immediate effect reversion (escape hatch)."""
+        """Clear all window tracking and begin display restoration immediately (escape hatch)."""
         self.windows.clear()
         self._cancel_pending_revert()
         self._cancel_pending_stage()
@@ -386,7 +409,7 @@ class Daemon:
     # -- Configuration API Handlers ----------------------------------------
 
     def get_outputs(self) -> str:
-        """Return each connected output with the config keys that would address it."""
+        """Return JSON array of connected outputs and their configuration match keys."""
         identities = output_identities()
         return json.dumps(
             [
@@ -535,15 +558,6 @@ class Daemon:
 
         # Update running effect with new options
         self.effect.update_options(EffectOptions.from_config(self.config))
-
-        # The effect class is chosen once at startup; a mode change needs a restart.
-        if self.config.effect.mode != self.effect.name:
-            log.warning(
-                "effect.mode is now '%s' but '%s' is running; restart theater-mode.service"
-                " to switch effects",
-                self.config.effect.mode,
-                self.effect.name,
-            )
 
         # Re-apply effect if a game is currently active
         if self.active_output is not None and self._applied_others is not None:

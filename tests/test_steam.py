@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from theater_mode.steam import (
     build_artwork,
     find_art_binary,
     find_hero_art,
+    prune_artwork_cache,
     steam_appid_for_window,
 )
 
@@ -210,6 +212,51 @@ class TestArtwork(unittest.TestCase):
                 cached_target = build_artwork("12345", 320, 240, 0.4)
                 self.assertEqual(cached_target, target)
                 self.assertEqual(mock_run.call_count, 1)
+
+    def test_prune_artwork_cache_preserves_valid_variants_under_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_dir = Path(tmp_dir)
+            current = cache_dir / "12345-v3-1920x1080-d0850.argb"
+            old_dim = cache_dir / "12345-v3-1920x1080-d0500.argb"
+            other_app = cache_dir / "67890-v3-1920x1080-d0850.argb"
+            for p in (current, old_dim, other_app):
+                p.write_bytes(b"x" * 1000)
+
+            prune_artwork_cache(cache_dir, current_target=current)
+            self.assertTrue(current.exists())
+            self.assertTrue(old_dim.exists())
+            self.assertTrue(other_app.exists())
+
+    def test_prune_artwork_cache_evicts_oldest_and_spares_current_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cache_dir = Path(tmp_dir)
+            files = [cache_dir / f"app{i}.argb" for i in (1, 2, 3)]
+            for age, path in enumerate(files):
+                path.write_bytes(b"x" * 500)
+                os.utime(path, (1000 + age, 1000 + age))
+
+            # The oldest entry is the one in use, so eviction has to skip it and take the
+            # next oldest. Only this surviving set satisfies both rules at once.
+            prune_artwork_cache(
+                cache_dir, current_target=files[0], max_bytes=1200, trim_to_bytes=1100
+            )
+            self.assertEqual({p.name for p in cache_dir.glob("*.argb")}, {"app1.argb", "app3.argb"})
+
+    def test_build_artwork_fail_soft_on_oserror(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            hero = Path(tmp_dir) / "library_hero.jpg"
+            hero.write_bytes(b"jpeg data")
+            fake_bin = Path(tmp_dir) / "theater-art"
+            fake_bin.touch(mode=0o755)
+
+            with (
+                patch("theater_mode.steam.find_hero_art", return_value=hero),
+                patch("theater_mode.steam.find_art_binary", return_value=fake_bin),
+                patch("theater_mode.steam.ART_CACHE", Path(tmp_dir) / "cache"),
+                patch("subprocess.run", side_effect=OSError("Disk full")),
+                self.assertLogs("theater-moded", level="WARNING"),
+            ):
+                self.assertIsNone(build_artwork("12345", 320, 240, 0.4))
 
 
 if __name__ == "__main__":

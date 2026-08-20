@@ -55,7 +55,7 @@ class Effect(ABC):
         """Adopt new options while the effect is live (no-op for stateless effects)."""
 
     @abstractmethod
-    def apply(self, game_output: str, other_outputs: list[str], appid: str) -> None:
+    def apply(self, game_output: str, other_outputs: list[str], appid: str) -> bool:
         """Apply the effect to secondary displays when a game is active on game_output."""
         raise NotImplementedError
 
@@ -63,6 +63,11 @@ class Effect(ABC):
     def revert(self, immediate: bool = False) -> None:
         """Revert displays to their original state."""
         raise NotImplementedError
+
+    @property
+    def is_running(self) -> bool:
+        """Report whether a stateful effect engine is currently running."""
+        return True
 
     def cancel_pending(self) -> None:
         """Cancel any queued asynchronous or timed transitions without reverting active state."""

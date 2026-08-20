@@ -21,7 +21,7 @@ from theater_mode.constants import (
     OBJECT_PATH,
 )
 from theater_mode.daemon import Daemon
-from theater_mode.effects import EFFECTS, EffectOptions
+from theater_mode.effects import DimEffect, EffectOptions
 from theater_mode.service import make_handler
 
 log = logging.getLogger("theater-moded")
@@ -84,13 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             d.line_number or "-",
         )
 
-    effect_mode = resolved_config.effect.mode
-    if effect_mode not in EFFECTS:
-        log.warning("configured effect '%s' not recognized; falling back to 'dim'", effect_mode)
-        effect_mode = "dim"
-
-    effect_cls = EFFECTS[effect_mode]
-    effect = effect_cls.create(EffectOptions.from_config(resolved_config))
+    effect = DimEffect.create(EffectOptions.from_config(resolved_config))
 
     daemon = Daemon(
         effect=effect,
@@ -107,9 +101,12 @@ def main(argv: list[str] | None = None) -> int:
     from gi.repository import Gio, GLib, GLibUnix
 
     loop = GLib.MainLoop()
+    exit_code = 0
 
     def shutdown(*_: object) -> bool:
         """Handle termination signals and ensure displays are restored immediately."""
+        nonlocal exit_code
+        exit_code = 0
         log.info("shutting down; reverting active effects")
         try:
             daemon.clear(immediate=True)
@@ -147,7 +144,9 @@ def main(argv: list[str] | None = None) -> int:
         log.info("listening on %s as %s (effect: %s)", OBJECT_PATH, name, effect.name)
 
     def on_name_lost(*_: object) -> None:
+        nonlocal exit_code
         log.error("lost D-Bus name %s; another instance may be active", BUS_NAME)
+        exit_code = 1
         loop.quit()
 
     Gio.bus_own_name(
@@ -160,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     loop.run()
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":
