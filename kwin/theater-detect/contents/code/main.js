@@ -147,7 +147,7 @@ function watchScreens() {
     screenSettle.timeout.connect(sendSnapshot);
 
     workspace.screensChanged.connect(function () {
-        screenSettle.restart();
+        screenSettle.start();
     });
 }
 
