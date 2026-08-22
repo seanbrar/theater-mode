@@ -120,9 +120,28 @@ function onWindowRemoved(window) {
     announceClosed(window);
 }
 
+function screenNames() {
+    var names = [];
+    try {
+        if (workspace.screens) {
+            for (var i = 0; i < workspace.screens.length; i++) {
+                var s = workspace.screens[i];
+                if (s && s.name) {
+                    names.push(String(s.name));
+                }
+            }
+        }
+    } catch (e) {
+        // An empty list leaves the daemon on its DRM sysfs fallback.
+    }
+    return names;
+}
+
 // Send full window snapshot to synchronize daemon state.
 function sendSnapshot() {
-    callDBus(SERVICE, OBJPATH, IFACE, "SnapshotBegin");
+    // Names are joined into one string, as callDBus marshals scalar arguments only.
+    var screens = screenNames();
+    callDBus(SERVICE, OBJPATH, IFACE, "SnapshotBegin", screens.join(","));
 
     var windows = workspace.windowList();
     for (var i = 0; i < windows.length; i++) {

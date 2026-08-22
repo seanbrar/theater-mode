@@ -59,6 +59,7 @@ global.QTimer = function () {
 };
 
 global.workspace = {
+    screens: [{ name: "DP-1" }, { name: "DP-2" }],
     windowList: function () { return windows; },
     windowAdded: new Signal(),
     windowRemoved: new Signal(),
@@ -103,7 +104,7 @@ function assertTimer(timer, label, expected) {
 
 // Initial snapshot announces existing normal windows bracketed by SnapshotBegin/End.
 assert.deepEqual(methodsSince(0),
-                 ["SnapshotBegin", "WindowOpened:existing", "SnapshotEnd"]);
+                 ["SnapshotBegin:DP-1,DP-2", "WindowOpened:existing", "SnapshotEnd"]);
 assert.equal(existing.outputChanged.handlers.length, 1);
 assert.equal(existing.fullScreenChanged.handlers.length, 1);
 
@@ -115,7 +116,7 @@ late.normalWindow = true;
 var marker = mark();
 fire(heartbeat);
 assert.deepEqual(methodsSince(marker),
-                 ["SnapshotBegin", "WindowOpened:existing", "WindowOpened:late", "SnapshotEnd"]);
+                 ["SnapshotBegin:DP-1,DP-2", "WindowOpened:existing", "WindowOpened:late", "SnapshotEnd"]);
 assert.equal(late.outputChanged.handlers.length, 1);
 assert.equal(late.fullScreenChanged.handlers.length, 1);
 
@@ -188,5 +189,5 @@ assert.equal(timers.length, 2);
 
 fire(screenSettle);
 assert.deepEqual(methodsSince(marker),
-                 ["SnapshotBegin", "WindowOpened:existing", "SnapshotEnd"]);
+                 ["SnapshotBegin:DP-1,DP-2", "WindowOpened:existing", "SnapshotEnd"]);
 assert.equal(screenSettle.running, false);

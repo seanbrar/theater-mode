@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import unittest
+import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock
 
-from theater_mode.constants import INTERFACE, OBJECT_PATH
+from theater_mode.constants import INTERFACE, INTERFACE_XML, OBJECT_PATH
 from theater_mode.service import make_handler
 
 
@@ -53,10 +54,20 @@ class TestServiceDispatch(unittest.TestCase):
         self.mock_daemon.window_closed.assert_called_once_with("win-1")
 
         # SnapshotBegin & SnapshotEnd
-        self._call("SnapshotBegin")
-        self.mock_daemon.snapshot_begin.assert_called_once()
+        self._call("SnapshotBegin", FakeVariant("DP-1,DP-2"))
+        self.mock_daemon.snapshot_begin.assert_called_once_with("DP-1,DP-2")
         self._call("SnapshotEnd")
         self.mock_daemon.snapshot_end.assert_called_once()
+
+    def test_snapshot_begin_interface_accepts_screen_names(self) -> None:
+        root = ET.fromstring(INTERFACE_XML)
+        method = root.find(f"./interface[@name='{INTERFACE}']/method[@name='SnapshotBegin']")
+        self.assertIsNotNone(method)
+        args = method.findall("arg") if method is not None else []
+        self.assertEqual(
+            [(arg.get("name"), arg.get("type"), arg.get("direction")) for arg in args],
+            [("screens", "s", "in")],
+        )
 
     def test_daemon_query_and_control_methods(self) -> None:
         self.mock_daemon.status.return_value = "Active"

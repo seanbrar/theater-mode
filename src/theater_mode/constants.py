@@ -110,7 +110,9 @@ INTERFACE_XML = f"""
     <method name='WindowClosed'>
       <arg type='s' name='window_id' direction='in'/>
     </method>
-    <method name='SnapshotBegin'/>
+    <method name='SnapshotBegin'>
+      <arg type='s' name='screens' direction='in'/>
+    </method>
     <method name='SnapshotEnd'/>
     <method name='Status'>
       <arg type='s' name='status_json' direction='out'/>

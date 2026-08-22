@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 
 from theater_mode.config import DaemonConfig, DevConfig, ResolvedConfig
 from theater_mode.daemon import Daemon
+from theater_mode.display.edid import OutputIdentity
 
 
 class FakeScheduler:
@@ -96,7 +97,7 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(len(self.daemon.windows), 2)
 
         # Snapshot containing only win-1
-        self.daemon.snapshot_begin()
+        self.daemon.snapshot_begin("")
         self.daemon.window_opened("win-1", "steam_app_100", "300", "DP-1", "true")
         self.daemon.snapshot_end()
 
@@ -324,7 +325,7 @@ class TestDaemon(unittest.TestCase):
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
     def test_snapshot_reconciles_once_after_all_windows_arrive(self, _) -> None:
-        self.daemon.snapshot_begin()
+        self.daemon.snapshot_begin("")
         self.daemon.window_opened("browser", "firefox", "100", "DP-2", "false")
         self.daemon.window_opened("game", "steam_app_100", "200", "DP-1", "true")
         self.mock_effect.apply.assert_not_called()
@@ -343,9 +344,50 @@ class TestDaemon(unittest.TestCase):
         self.daemon._detector_contact -= 300.0
         self.assertGreater(silence(), 60.0)
 
-        self.daemon.snapshot_begin()
+        self.daemon.snapshot_begin("")
         self.daemon.snapshot_end()
         self.assertLess(silence(), 60.0)
+
+    @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "HDMI-A-1"})
+    def test_compositor_screens_override_drm_outputs(self, _) -> None:
+        self.daemon.snapshot_begin("Virtual-1,Virtual-2")
+        self.assertEqual(self.daemon.all_outputs(), {"Virtual-1", "Virtual-2"})
+
+        self.daemon.window_opened("game", "steam_app_100", "200", "Virtual-1", "true")
+        self.daemon.snapshot_end()
+
+        self.mock_effect.apply.assert_called_once_with("Virtual-1", ["Virtual-2"], "100")
+
+    @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1"})
+    def test_fallback_to_drm_when_no_compositor_screens_reported(self, _) -> None:
+        self.assertEqual(self.daemon.all_outputs(), {"DP-1"})
+
+        self.daemon.snapshot_begin("")
+        self.daemon.snapshot_end()
+        self.assertEqual(self.daemon.all_outputs(), {"DP-1"})
+
+    @patch("theater_mode.daemon.output_identities")
+    def test_get_outputs_synthesizes_entries_for_compositor_only_outputs(
+        self, mock_identities
+    ) -> None:
+        mock_identities.return_value = {
+            "DP-1": OutputIdentity(connector="DP-1", vendor="Dell", model="S2721QS"),
+            "HDMI-A-1": OutputIdentity(connector="HDMI-A-1", vendor="Samsung", model="TV"),
+        }
+        self.daemon.snapshot_begin("Virtual-1,DP-1")
+        self.daemon.snapshot_end()
+        outputs = json.loads(self.daemon.get_outputs())
+        connectors = {o["connector"] for o in outputs}
+        # HDMI-A-1 is attached but unused by the compositor, and stays configurable.
+        self.assertEqual(connectors, {"DP-1", "HDMI-A-1", "Virtual-1"})
+
+        virtual_entry = next(o for o in outputs if o["connector"] == "Virtual-1")
+        self.assertIsNone(virtual_entry["model"])
+        self.assertEqual(virtual_entry["match_keys"], [])
+
+        real_entry = next(o for o in outputs if o["connector"] == "DP-1")
+        self.assertEqual(real_entry["model"], "S2721QS")
+        self.assertEqual(real_entry["match_keys"], ["Dell:S2721QS"])
 
 
 if __name__ == "__main__":

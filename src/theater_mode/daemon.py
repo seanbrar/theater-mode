@@ -21,6 +21,7 @@ from theater_mode.config import (
     validate_updates,
 )
 from theater_mode.display.drm import connected_outputs, output_identities
+from theater_mode.display.edid import OutputIdentity
 from theater_mode.effects.base import Effect, EffectOptions
 from theater_mode.steam import steam_appid_for_window
 from theater_mode.utils import parse_bool, parse_int
@@ -99,6 +100,7 @@ class Daemon:
         self.windows: dict[str, TrackedWindow] = {}
         self.active_output: str | None = None
         self._applied_others: list[str] | None = None
+        self._compositor_outputs: set[str] = set()
         # Track time since last detector snapshot (seeded at start for silence calculations).
         self._detector_contact: float = time.monotonic()
         self._snapshot: set[str] | None = None
@@ -260,9 +262,9 @@ class Daemon:
         log.info("a game window returned within %.1fs; staying in theater mode", self.revert_delay)
 
     def all_outputs(self) -> set[str]:
-        """Aggregate known outputs from active window metadata and DRM sysfs."""
+        """Aggregate known outputs, preferring compositor reports over DRM sysfs fallback."""
         outputs = {w.output for w in self.windows.values() if w.output}
-        outputs.update(connected_outputs())
+        outputs.update(self._compositor_outputs or connected_outputs())
         return outputs
 
     # -- D-Bus Interface Handlers ------------------------------------------
@@ -345,8 +347,11 @@ class Daemon:
         if self._snapshot is None:
             self.reconcile()
 
-    def snapshot_begin(self) -> None:
+    def snapshot_begin(self, screens: str) -> None:
         """Begin full window pass from KWin detector script, tracking active window IDs."""
+        # An empty list means the detector could not read its screens; keep the sysfs fallback.
+        if screens:
+            self._compositor_outputs = {s.strip() for s in screens.split(",") if s.strip()}
         self._snapshot = set()
 
     def snapshot_end(self) -> None:
@@ -411,8 +416,12 @@ class Daemon:
     def get_outputs(self) -> str:
         """Return JSON array of connected outputs and their configuration match keys."""
         identities = output_identities()
-        return json.dumps(
-            [
+        # List every connector as well, so a display switched off in the compositor
+        # still shows the match keys needed to write an [outputs.*] rule for it.
+        results = []
+        for name in sorted(set(identities) | self.all_outputs()):
+            identity = identities.get(name) or OutputIdentity(connector=name)
+            results.append(
                 {
                     "connector": name,
                     "vendor": identity.vendor,
@@ -422,10 +431,8 @@ class Daemon:
                     "match_keys": list(identity.match_keys),
                     "active": name == self.active_output,
                 }
-                for name, identity in sorted(identities.items())
-            ],
-            indent=2,
-        )
+            )
+        return json.dumps(results, indent=2)
 
     def get_resolved(self) -> str:
         """Return JSON dump of full resolved configuration with provenance."""
