@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -463,6 +465,39 @@ revert_delay = 3.0
 
         parsed = tomllib.loads(ref)
         self.assertEqual(parsed["effect"]["dimming"], 0.85)
+
+    def test_package_exports_are_lazy_and_complete(self) -> None:
+        script = f"""
+import sys
+
+sys.path.insert(0, {str(Path(__file__).resolve().parent.parent / "src")!r})
+
+import theater_mode.config as config_pkg
+
+submodules = {{
+    "theater_mode.config.dev",
+    "theater_mode.config.generator",
+    "theater_mode.config.loader",
+    "theater_mode.config.provenance",
+    "theater_mode.config.schema",
+    "theater_mode.config.writer",
+}}
+assert submodules.isdisjoint(sys.modules), submodules & sys.modules.keys()
+
+for name in config_pkg.__all__:
+    assert getattr(config_pkg, name) is not None, name
+
+names = dir(config_pkg)
+assert len(names) == len(set(names))
+assert set(config_pkg.__all__).issubset(names)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":

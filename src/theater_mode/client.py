@@ -11,7 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from theater_mode import __version__
-from theater_mode.config import lookup_spec, split_key_path
+from theater_mode.config.loader import lookup_spec, split_key_path
 from theater_mode.constants import APP_DATA, BUS_NAME, INTERFACE, OBJECT_PATH
 from theater_mode.utils import plural
 
