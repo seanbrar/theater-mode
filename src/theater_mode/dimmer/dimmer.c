@@ -51,6 +51,7 @@
 
 #define MAX_OUTPUTS 32
 #define BUFFER_SIZE 4096
+#define DISCARDING_LINE SIZE_MAX
 
 #define MAX_ART_EDGE 16384
 
@@ -119,6 +120,12 @@ struct dimmer_app {
 
     struct output_state outputs[MAX_OUTPUTS];
     bool running;
+};
+
+struct command_input {
+    char data[BUFFER_SIZE];
+    /* DISCARDING_LINE means input is dropped until the next newline. */
+    size_t len;
 };
 
 static volatile sig_atomic_t g_signal_received = 0;
@@ -636,6 +643,16 @@ static int count_outputs(const struct dimmer_app *app) {
     return count;
 }
 
+static int parse_art_edge(const char *str) {
+    int value = 0;
+    while (*str) {
+        if (*str < '0' || *str > '9') return 0;
+        value = value * 10 + *str++ - '0';
+        if (value > MAX_ART_EDGE) return 0;
+    }
+    return value;
+}
+
 static void handle_art(struct dimmer_app *app) {
     char *name = strtok(NULL, " \t\r\n");
     char *width_str = strtok(NULL, " \t\r\n");
@@ -657,15 +674,36 @@ static void handle_art(struct dimmer_app *app) {
         return;
     }
 
-    if (!path || !*path) {
+    if (!width_str) {
         destroy_art(out);
         printf("OK ART %s cleared\n", name);
         fflush(stdout);
         return;
     }
 
-    int width = width_str ? atoi(width_str) : 0;
-    int height = height_str ? atoi(height_str) : 0;
+    if (!height_str || !path) {
+        printf("ERR invalid ART arguments\n");
+        fflush(stdout);
+        return;
+    }
+
+    while (*path == ' ' || *path == '\t') {
+        path++;
+    }
+    if (!*path) {
+        printf("ERR invalid ART arguments\n");
+        fflush(stdout);
+        return;
+    }
+
+    int width = parse_art_edge(width_str);
+    int height = parse_art_edge(height_str);
+    if (!width || !height) {
+        printf("ERR invalid ART dimensions\n");
+        fflush(stdout);
+        return;
+    }
+
     if (stage_art(app, out, path, width, height) < 0) {
         printf("ERR ART %s rejected\n", name);
         fflush(stdout);
@@ -875,6 +913,40 @@ static void handle_command(struct dimmer_app *app, char *line) {
     }
 }
 
+static void read_commands(struct dimmer_app *app, struct command_input *input, int fd) {
+    size_t len = input->len == DISCARDING_LINE ? 0 : input->len;
+    ssize_t count = read(fd, input->data + len, sizeof(input->data) - len);
+    if (count <= 0) {
+        if (!count) app->running = false;
+        return;
+    }
+
+    char *line = input->data;
+    char *end = line + len + (size_t)count;
+    if (input->len == DISCARDING_LINE) {
+        char *newline = memchr(line, '\n', (size_t)(end - line));
+        if (!newline) return;
+        line = newline + 1;
+    }
+
+    char *newline;
+    while ((newline = memchr(line, '\n', (size_t)(end - line)))) {
+        *newline = '\0';
+        handle_command(app, line);
+        line = newline + 1;
+    }
+
+    input->len = (size_t)(end - line);
+    memmove(input->data, line, input->len);
+    if (input->len == sizeof(input->data)) {
+        fprintf(stderr, "theater-dimmer: input line exceeds %zu bytes\n",
+                sizeof(input->data) - 1);
+        printf("ERR line too long\n");
+        fflush(stdout);
+        input->len = DISCARDING_LINE;
+    }
+}
+
 static void print_usage(FILE *out) {
     fprintf(out,
             "theater-dimmer %s — Wayland layer-shell display dimmer.\n"
@@ -896,6 +968,7 @@ static void print_usage(FILE *out) {
             THEATER_DIMMER_VERSION);
 }
 
+#ifndef DIMMER_TEST_HARNESS
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
@@ -957,8 +1030,7 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     int exit_code = 0;
-    char input_buf[BUFFER_SIZE];
-    size_t input_len = 0;
+    struct command_input input = {0};
 
     struct pollfd fds[2];
     fds[0].fd = wl_display_get_fd(app.display);
@@ -997,29 +1069,7 @@ int main(int argc, char **argv) {
         }
 
         if (fds[1].revents & POLLIN) {
-            ssize_t n = read(STDIN_FILENO, input_buf + input_len, sizeof(input_buf) - input_len - 1);
-            if (n > 0) {
-                input_len += (size_t)n;
-                input_buf[input_len] = '\0';
-
-                char *line_start = input_buf;
-                char *newline;
-                while ((newline = strchr(line_start, '\n')) != NULL) {
-                    *newline = '\0';
-                    handle_command(&app, line_start);
-                    line_start = newline + 1;
-                }
-
-                size_t consumed = (size_t)(line_start - input_buf);
-                if (consumed < input_len) {
-                    memmove(input_buf, line_start, input_len - consumed);
-                    input_len -= consumed;
-                } else {
-                    input_len = 0;
-                }
-            } else if (n == 0) {
-                app.running = false;
-            }
+            read_commands(&app, &input, STDIN_FILENO);
         }
 
         if (fds[1].revents & (POLLHUP | POLLERR)) {
@@ -1056,3 +1106,4 @@ int main(int argc, char **argv) {
 
     return exit_code;
 }
+#endif

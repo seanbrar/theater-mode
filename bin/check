@@ -84,16 +84,24 @@ echo "[check] Verifying the release ABI floor..."
 ./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer
 ./bin/check-abi-floor src/theater_mode/art/theater-art 2.35 "libc.so.6 libm.so.6"
 
-echo "[check] Building the artwork helper and unit tests with ASan and UBSan..."
+echo "[check] Building the native helpers and unit tests with ASan and UBSan..."
 "$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/art -DTHEATER_ART_VERSION='"test"' \
     tests/art/test_pipeline.c -lm -o "$WORK/test_pipeline" &
 test_pid=$!
 "$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/art -DTHEATER_ART_VERSION="\"$PKG_VERSION\"" \
     src/theater_mode/art/main.c src/theater_mode/art/pipeline.c -lm -o "$WORK/theater-art-asan" &
 art_asan_pid=$!
-wait_for_jobs "sanitizer build" "$test_pid" "$art_asan_pid"
+"$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/dimmer -DTHEATER_DIMMER_VERSION="\"$PKG_VERSION\"" \
+    tests/dimmer/test_parser.c src/theater_mode/dimmer/wlr-layer-shell-unstable-v1-protocol.c \
+    src/theater_mode/dimmer/viewporter-protocol.c src/theater_mode/dimmer/single-pixel-buffer-v1-protocol.c \
+    src/theater_mode/dimmer/alpha-modifier-v1-protocol.c src/theater_mode/dimmer/xdg-shell-protocol.c \
+    -lwayland-client -lm -o "$WORK/test_dimmer_parser" &
+dimmer_test_pid=$!
+wait_for_jobs "sanitizer build" "$test_pid" "$art_asan_pid" "$dimmer_test_pid"
 
-echo "[check] Running artwork unit tests..."
+echo "[check] Running dimmer and artwork unit tests..."
+ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+    "$WORK/test_dimmer_parser"
 ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
     "$WORK/test_pipeline" tests/fixtures/artwork_reference
 
