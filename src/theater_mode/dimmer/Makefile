@@ -1,6 +1,10 @@
-CPPFLAGS ?= -D_FORTIFY_SOURCE=3
-CFLAGS ?= -O2 -Wall -Wextra -pedantic -fstack-protector-strong -fPIE
-LDFLAGS ?= -Wl,-z,relro,-z,now -pie
+# The fortify redefinition belongs in CFLAGS: $(CPPFLAGS) expands first, so a level set
+# there would arrive ahead of a caller's CFLAGS and lose to it. The -U must precede the
+# -D, or the redefinition warns. -ffile-prefix-map does nothing until a caller adds -g.
+CFLAGS ?= -Wall -Wextra -pedantic
+override CFLAGS += -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -O2 -fstack-protector-strong \
+                   -fPIE -ffile-prefix-map=$(CURDIR)=.
+override LDFLAGS += -Wl,-z,relro,-z,now -pie
 
 # Prevent the C23 strtol redirect from raising the glibc symbol floor on newer compilers.
 # Paired with _DEFAULT_SOURCE in dimmer.c: both are required, neither is sufficient alone.

@@ -57,6 +57,13 @@ ROOT="$STAGE/$NAME"
 
 mkdir -p "$ROOT"
 
+# Packaging must not read the wall clock.
+# tar takes this as --mtime below. Nothing downstream reads the variable; no export.
+if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH="$(git log -1 --format=%ct HEAD)" \
+        || die "could not read the commit timestamp; refusing to build an unreproducible archive"
+fi
+
 # Development-only paths are excluded during extraction rather than deleted afterward
 # so the ~30 MB reference corpus is never written to disk just to be removed.
 #
@@ -94,8 +101,10 @@ install -m 0755 "$ART" "$ROOT/bin/theater-art"
 mkdir -p "$OUTDIR"
 TARBALL="$OUTDIR/${NAME}.tar.gz"
 
+# Git applies the umask when it writes the working tree. Without --mode the same commit
+# archived under umask 077 and under umask 022 produces two different checksums.
 tar --sort=name --owner=0 --group=0 --numeric-owner \
-    --mtime="@$(git log -1 --format=%ct HEAD)" \
+    --mode='go-w,go+rX' --mtime="@$SOURCE_DATE_EPOCH" \
     -czf "$TARBALL" -C "$STAGE" "$NAME"
 
 ( cd "$OUTDIR" && sha256sum "$(basename "$TARBALL")" > "${NAME}.tar.gz.sha256" )

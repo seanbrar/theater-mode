@@ -47,11 +47,14 @@ need ruff
 echo "[check] Building the Wayland dimmer and artwork helper..."
 make -C src/theater_mode/dimmer clean >/dev/null
 make -C src/theater_mode/art clean >/dev/null
+# These flags are hostile on purpose. The Makefile override has to come after them: if it
+# does not, -O0 survives and glibc warns that fortification needs optimization; if the -U
+# is dropped, the -D warns about redefinition. -Werror turns either into a build failure.
 make -C src/theater_mode/dimmer \
-    CFLAGS="-O2 -Wall -Wextra -pedantic -Werror -fstack-protector-strong -fPIE" >/dev/null &
+    CFLAGS="-O0 -D_FORTIFY_SOURCE=0 -Wall -Wextra -pedantic -Werror" >/dev/null &
 dimmer_pid=$!
 make -C src/theater_mode/art \
-    CFLAGS="-O2 -Wall -Wextra -pedantic -Werror -fstack-protector-strong -fPIE" >/dev/null &
+    CFLAGS="-O0 -D_FORTIFY_SOURCE=0 -Wall -Wextra -pedantic -Werror" >/dev/null &
 art_pid=$!
 wait_for_jobs "native helper build" "$dimmer_pid" "$art_pid"
 
@@ -64,6 +67,18 @@ DIMMER_VERSION="$(src/theater_mode/dimmer/theater-dimmer --version | awk '{print
 ART_VERSION="$(src/theater_mode/art/theater-art --version | awk '{print $2}')"
 [ "$PKG_VERSION" = "$ART_VERSION" ] \
     || die "theater-art reports $ART_VERSION but the package is $PKG_VERSION"
+
+echo "[check] Verifying the helpers kept their hardening flags..."
+for binary in src/theater_mode/dimmer/theater-dimmer src/theater_mode/art/theater-art; do
+    readelf -h "$binary" | grep -q 'Type:.*DYN' \
+        || die "$binary is not position-independent; -fPIE/-pie did not survive"
+    readelf -d "$binary" | grep -q 'BIND_NOW' \
+        || die "$binary was not linked with -z now; LDFLAGS did not survive"
+    readelf --dyn-syms -W "$binary" | grep -qE '__[[:alnum:]_]+_chk@' \
+        || die "$binary has no fortified libc calls; _FORTIFY_SOURCE did not survive"
+    readelf --dyn-syms -W "$binary" | grep -q '__stack_chk_fail@' \
+        || die "$binary has no stack canary checks; stack protection did not survive"
+done
 
 echo "[check] Verifying the release ABI floor..."
 ./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer

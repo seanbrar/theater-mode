@@ -38,7 +38,7 @@ Steam Deck, and most Bazzite devices. See [Installing from source](#installing-f
 for other processors.
 
 <details>
-<summary>Install without piping a script into Bash</summary>
+<summary>Install without piping a script into Bash, or verify a download yourself</summary>
 
 Download the archive and checksum from [GitHub Releases](https://github.com/seanbrar/theater-mode/releases), verify the download against its checksum, then extract and install it:
 
@@ -48,6 +48,22 @@ tar xzf theater-mode-v*-linux-x86_64.tar.gz
 cd theater-mode-v*-linux-x86_64
 ./install.sh
 ```
+
+The checksum is published beside the archive, so on its own it only catches a damaged
+download. Every release is also signed by the workflow that built it. With the
+[GitHub CLI](https://cli.github.com), you can confirm the archive really is the one
+GitHub built from this repository:
+
+```sh
+gh attestation verify theater-mode-v*-linux-x86_64.tar.gz \
+    --repo seanbrar/theater-mode \
+    --signer-workflow seanbrar/theater-mode/.github/workflows/release.yml
+```
+
+The one-command installer runs this same check whenever `gh` is installed and signed in,
+and stops rather than installing an archive that fails it. Without `gh` it verifies the
+checksum alone. `theater-mode update` also verifies the checksum only, because it cannot
+assume `gh` is present.
 
 </details>
 

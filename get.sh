@@ -4,7 +4,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/seanbrar/theater-mode/main/get.sh | bash
 #
-# Downloads the latest release, verifies its published checksum, and runs its installer.
+# Downloads the latest release, verifies its checksum and, where `gh` is available, its
+# build provenance, then runs its installer.
 #
 # Arguments after `-s --` are passed straight through to install.sh, e.g.
 #
@@ -111,9 +112,43 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
     printf '\033[31merror:\033[0m the download does not match its published checksum.\n' >&2
     info "expected $EXPECTED" >&2
     info "actual   $ACTUAL" >&2
-    die "nothing was installed"
+    printf '\n  Nothing was installed. An interrupted download is the usual cause, so try\n' >&2
+    printf '  again. If it keeps happening, please report it:\n' >&2
+    printf '    https://github.com/%s/issues\n' "$REPO" >&2
+    exit 1
 fi
 echo "  checksum verified"
+
+# The attestation is what binds the archive to the release workflow, and a failed
+# verification stops the install. Verification is skipped when:
+#   - `gh` is absent, unauthenticated, or lacks the `attestation` command
+#   - THEATER_MODE_REPO names a fork, which publishes no attestations
+#
+# --hostname pins the lookup to github.com. A GH_HOST aimed at an enterprise instance
+# would otherwise fail an install that should have fallen through to the checksum.
+if [ -z "${THEATER_MODE_REPO:-}" ] && command -v gh >/dev/null 2>&1 \
+   && gh attestation verify --help >/dev/null 2>&1; then
+    rc=0
+    gh attestation verify "$TMP/release.tar.gz" --hostname github.com --repo "$REPO" \
+        --signer-workflow "$REPO/.github/workflows/release.yml" \
+        >/dev/null 2>"$TMP/provenance.err" || rc=$?
+    case "$rc" in
+        0)
+            echo "  build provenance verified"
+            ;;
+        4)
+            ;;
+        *)
+            printf '\033[31merror:\033[0m could not confirm this download was built by %s.\n' "$REPO" >&2
+            info "expected an attestation from $REPO/.github/workflows/release.yml" >&2
+            sed 's/^/  /' "$TMP/provenance.err" >&2
+            printf '\n  Nothing was installed. If the message above points at GitHub rather than\n' >&2
+            printf '  at the archive, try again shortly. Otherwise please report it:\n' >&2
+            printf '    https://github.com/%s/issues\n' "$REPO" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 mkdir -p "$TMP/tree"
 tar xzf "$TMP/release.tar.gz" -C "$TMP/tree" --no-same-owner --no-same-permissions \

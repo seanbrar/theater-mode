@@ -9,10 +9,9 @@ improvements are welcome. This guide describes the workflow enforced by CI.
 
 ### Prerequisites
 
-The full check needs Python 3.12+, PyGObject, PyYAML, a C compiler, `make`, `pkg-config`,
-the libwayland development headers, Ruff, ShellCheck, Node.js, and `readelf` (usually
-provided by `binutils`). KDE Plasma is required only for live desktop testing, not for
-the automated checks.
+`./bin/check` needs the Direct Runtime, Build Only, and Check Only tiers inventoried in
+[section 4](#4-dependency-tiers--provenance). KDE Plasma is required only for live desktop
+testing, not for the automated checks.
 
 After cloning the repository, choose either the container setup or a native toolchain.
 
@@ -171,7 +170,39 @@ changing the helper's Wayland protocols.
 
 ---
 
-## 4. Code Standards
+## 4. Dependency Tiers & Provenance
+
+This is a first-order inventory of what `theater-mode` imports, links, invokes while
+installing or building a release, and vendors. It stands in for a generated SBOM: small
+enough to keep accurate by hand, and specific enough to answer where each non-platform
+piece came from. It does not recursively enumerate the operating system. Platform
+requirements — KWin on Plasma 6, a compositor offering `wlr-layer-shell`, systemd user
+units — are described in the README.
+
+| Tier | Component | Purpose and origin |
+| --- | --- | --- |
+| **Direct Runtime** | Python 3.12+ and its standard library | Daemon runtime, CLI dispatch, configuration parsing, and the updater |
+| **Direct Runtime** | PyGObject (`Gio`, `GLib`, `GLibUnix`) | D-Bus IPC and the asynchronous event loop |
+| **Direct Runtime** | glibc (`libc.so.6`) | C and POSIX runtime for both native helpers |
+| **Direct Runtime** | `libwayland-client.so.0` | Wayland protocol transport for `theater-dimmer` |
+| **Direct Runtime** | `libm.so.6` | Linked by both native helpers for the resampler and fade-curve math |
+| **Transitive Runtime** | `libffi` | Required by `libwayland-client`; the distro selects its concrete soname and nothing here links it directly |
+| **Install and Update** | Bash 4+, `tar`, `gzip`, `curl` or `wget`, `sha256sum` or `shasum` | Bootstrap download, verification, installation, and removal |
+| **Vendored Code** | [`stb_image.h`](https://github.com/nothings/stb) v2.30 — MIT or Unlicense | JPEG and PNG decoding in `src/theater_mode/art/`. The full license text travels inside the header, which ships in the release archive. |
+| **Vendored Code** | Five `wayland-scanner` bindings — MIT or HPND | Layer-shell, viewporter, single-pixel-buffer, alpha-modifier, and xdg-shell client code compiled into `theater-dimmer`. Upstream repositories, XML paths, and the regeneration procedure are recorded in [`PROTOCOLS.md`](src/theater_mode/dimmer/PROTOCOLS.md). |
+| **Build Only** | C compiler, `make`, `pkg-config`, `libwayland-dev` | Compiling `theater-dimmer` and `theater-art`. GCC 12+ or Clang 9+ is needed for `_FORTIFY_SOURCE=3`; below that glibc warns and fortifies at level 2. |
+| **Release Only** | Git, GNU `tar`, `gzip`, Coreutils, Findutils | Selecting tracked inputs, deterministic archive assembly, and checksum generation |
+| **Check Only** | PyYAML, Node.js, `readelf` from Binutils, ShellCheck, Ruff | Workflow/schema parsing, KWin checks, ABI inspection, shell linting, and Python linting |
+| **Optional** | [`gh`](https://cli.github.com) | Verifying release build provenance in `get.sh`. A `gh` that is missing, unauthenticated, or too old to carry the `attestation` command falls back to checksum verification alone. |
+| **Maintainer Only** | Pillow | Rendering the reference artwork corpus (`tests/generate_reference_corpus.py`). Not needed to run `bin/check`, which compares against committed fixtures. |
+
+The prebuilt helpers target a glibc 2.35 floor, enforced by `bin/check-abi-floor`. Systems
+below that floor build the same sources through `./install.sh --build`, which is why the
+helper sources ship in the release archive.
+
+---
+
+## 5. Code Standards
 
 * **Modern Python**: Target Python 3.12+. Every Python file should begin with `from __future__ import annotations`.
 * **Type Annotations**: Provide explicit type hints for all function signatures and class attributes.
@@ -181,7 +212,7 @@ changing the helper's Wayland protocols.
 
 ---
 
-## 5. Git Commit Guidelines
+## 6. Git Commit Guidelines
 
 We follow a **Modern Markdown Git style**: concise, imperative subjects with a body focused on context, rationale, and architectural trade-offs, formatted to render cleanly across modern IDEs and GitHub.
 
@@ -265,7 +296,7 @@ effects: changes                 # Says nothing about intent
 
 ---
 
-## 6. Submitting Pull Requests
+## 7. Submitting Pull Requests
 
 1. Create a descriptive branch for your work: `git switch -c feature/my-enhancement`.
 2. Ensure `./bin/check` passes cleanly with no test failures or linter warnings.
