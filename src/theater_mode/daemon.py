@@ -24,7 +24,7 @@ from theater_mode.display.drm import connected_outputs, output_identities
 from theater_mode.display.edid import OutputIdentity
 from theater_mode.effects.base import Effect, EffectOptions
 from theater_mode.steam import steam_appid_for_window
-from theater_mode.utils import parse_bool, parse_int
+from theater_mode.utils import parse_bool, parse_int, plural
 
 log = logging.getLogger("theater-moded")
 
@@ -152,7 +152,7 @@ class Daemon:
         if stage is None:
             return
         if stage.output == self.active_output:
-            if self._applied_others and not self.effect.is_running:
+            if self.effect.affected_outputs and not self.effect.is_running:
                 log.info("display effect helper exited unexpectedly; re-applying")
                 self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
                 return
@@ -365,7 +365,8 @@ class Daemon:
             {
                 "effect": self.effect.name,
                 "effect_process_running": bool(self.effect.is_running),
-                "affected_outputs": list(self._applied_others or []),
+                "affected_outputs": list(self.effect.affected_outputs),
+                "secondary_outputs": list(self._applied_others or []),
                 "detector_silence_seconds": round(time.monotonic() - self._detector_contact, 1),
                 "active_output": self.active_output,
                 "revert_pending": self._pending_revert is not None,
@@ -454,7 +455,10 @@ class Daemon:
         self._session_overrides.update(accepted)
         self._reload_internal()
         log.info("applied session preview for %d keys", len(accepted))
-        return self._report(f"preview applied for {len(accepted)} keys", rejected)
+        summary = f"preview applied for {plural(len(accepted), 'key')}"
+        if accepted and self._all_connected_outputs_nullified():
+            summary += "; note: dimming is zero on every connected display, so none will change"
+        return self._report(summary, rejected)
 
     def revert_preview(self) -> str:
         """Discard in-memory session overrides and revert to resolved disk configuration."""
@@ -462,7 +466,7 @@ class Daemon:
         self._session_overrides.clear()
         self._reload_internal()
         log.info("reverted session preview (%d keys cleared)", count)
-        return f"preview reverted ({count} keys cleared)"
+        return f"preview reverted ({plural(count, 'key')} cleared)"
 
     def commit(self, keys_json: str) -> str:
         """Persist key updates to the user configuration file atomically and reload."""
@@ -473,7 +477,7 @@ class Daemon:
         # Never write a key or value that the loader would refuse to read back.
         accepted, rejected = validate_updates(updates)
         if not accepted:
-            return self._report("error: nothing to commit", rejected)
+            return self._report("error: no valid settings to commit", rejected)
 
         user_path = self.dev_config.user_config_override if self.dev_config else None
         ok, msg = commit_user_config(accepted, user_config_path=user_path)
@@ -483,7 +487,10 @@ class Daemon:
 
         log.info("committed %d keys to user configuration file", len(accepted))
         self._reload_internal()
-        return self._report(f"committed {len(accepted)} keys successfully", rejected)
+        summary = f"committed {plural(len(accepted), 'key')}"
+        if self._all_connected_outputs_nullified():
+            summary += "; note: dimming is zero on every connected display, so none will change"
+        return self._report(summary, rejected)
 
     def unset(self, keys_json: str) -> str:
         """Remove keys from the user configuration file so they fall back to a lower layer."""
@@ -513,7 +520,7 @@ class Daemon:
                 known.add(f"{table}.{leaf}")
 
         if not known:
-            return self._report("error: nothing to unset", rejected)
+            return self._report("error: no valid keys to unset", rejected)
 
         user_path = self.dev_config.user_config_override if self.dev_config else None
         ok, msg, removed = unset_user_config(known, user_config_path=user_path)
@@ -525,7 +532,7 @@ class Daemon:
             log.info("unset %d keys from user configuration file", len(removed))
             self._reload_internal()
 
-        summary = f"unset {len(removed)} keys"
+        summary = f"unset {plural(len(removed), 'key')}"
         if untouched := sorted(known - removed):
             summary += "; already unset: " + ", ".join(untouched)
         return self._report(summary, rejected)
@@ -538,6 +545,21 @@ class Daemon:
         for diagnostic in rejected:
             log.warning("rejected %s: %s", diagnostic.key_path, diagnostic.message)
         return summary + "; rejected: " + "; ".join(d.message for d in rejected)
+
+    def _all_connected_outputs_nullified(self) -> bool:
+        """Return whether every connected output resolves to zero dimming."""
+        outputs = self.all_outputs()
+        if not outputs:
+            return False
+        identities = output_identities()
+        return all(
+            self.config.resolve_for_output(
+                output,
+                identities[output].match_keys if output in identities else (),
+            ).dimming
+            == 0
+            for output in outputs
+        )
 
     def reload(self) -> str:
         """Re-read configuration files from disk and refresh active effects."""

@@ -71,7 +71,7 @@ def _trailing_comment(text: str) -> str:
 def update_toml_content(original_content: str, updates: dict[str, Any]) -> str:
     """Update TOML text in place, preserving existing comments, whitespace, and ordering.
 
-    updates maps a full key path ('effect.placement', 'outputs.DP-1.dim_factor') to a new value.
+    updates maps a full key path ('effect.placement', 'outputs.DP-1.dimming') to a new value.
     """
     table_updates: dict[str, dict[str, str]] = {}
     for key_path, raw_val in updates.items():

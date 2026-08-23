@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import tomllib
@@ -100,7 +101,7 @@ def lookup_spec(key_path: str) -> FieldSpec | None:
 
 
 def _extract_line_numbers(text: str) -> dict[str, int]:
-    """Map key paths ('effect.placement', 'outputs.DP-1.dim_factor') to their line numbers."""
+    """Map key paths ('effect.placement', 'outputs.DP-1.dimming') to their line numbers."""
     line_map: dict[str, int] = {}
     current_table = ""
 
@@ -176,6 +177,8 @@ class ConfigLoader:
                 if isinstance(value, bool) or not isinstance(value, int | float):
                     return reject(f"Expected number for '{key_path}', got {actual}")
                 number = float(value)
+                if not math.isfinite(number):
+                    return reject(f"Value for '{key_path}' cannot be NaN or infinity")
                 if spec.min_value is not None and number < spec.min_value:
                     return reject(
                         f"Value {number} for '{key_path}' is below minimum {spec.min_value}"

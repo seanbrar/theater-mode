@@ -11,7 +11,7 @@ from typing import override
 from theater_mode.config import ResolvedConfig, ResolvedDisplaySettings, format_table_header
 from theater_mode.config.schema import (
     DEFAULT_CURVE,
-    DEFAULT_DIM_FACTOR,
+    DEFAULT_DIMMING,
     DEFAULT_DURATION,
     DEFAULT_PLACEMENT,
 )
@@ -40,7 +40,7 @@ class DimEffect(Effect):
     def __init__(
         self,
         placement: str = DEFAULT_PLACEMENT,
-        dim_factor: float = DEFAULT_DIM_FACTOR,
+        dimming: float = DEFAULT_DIMMING,
         duration: float = DEFAULT_DURATION,
         curve: str = DEFAULT_CURVE,
         art: bool = True,
@@ -48,7 +48,7 @@ class DimEffect(Effect):
         resolved_config: ResolvedConfig | None = None,
     ) -> None:
         self._placement = placement.lower()
-        self._dim_factor = dim_factor
+        self._dimming = dimming
         self._duration = duration
         self._curve = curve.lower()
         self._art = art
@@ -56,13 +56,14 @@ class DimEffect(Effect):
         self._resolved_config = resolved_config
         self._process: subprocess.Popen[str] | None = None
         self._dimmed = False
+        self._affected_outputs: tuple[str, ...] = ()
 
     @classmethod
     @override
     def create(cls, options: EffectOptions) -> DimEffect:
         return cls(
             placement=options.placement,
-            dim_factor=options.dim_factor,
+            dimming=options.dimming,
             duration=options.dim_duration,
             curve=options.dim_curve,
             art=options.art,
@@ -73,7 +74,7 @@ class DimEffect(Effect):
     def update_options(self, options: EffectOptions) -> None:
         """Update active effect parameters dynamically."""
         self._placement = options.placement.lower()
-        self._dim_factor = options.dim_factor
+        self._dimming = options.dimming
         self._duration = options.dim_duration
         self._curve = options.dim_curve.lower()
         self._art = options.art
@@ -149,7 +150,7 @@ class DimEffect(Effect):
             return ResolvedDisplaySettings(
                 output_id=output,
                 placement=self._placement,
-                dim_factor=self._dim_factor,
+                dimming=self._dimming,
                 art=self._art,
                 duration=self._duration,
                 curve=self._curve,
@@ -178,7 +179,7 @@ class DimEffect(Effect):
         """Report the outputs a per-output rule actually changed, and what changed."""
         globals_ = {
             "placement": self._placement,
-            "dim_factor": self._dim_factor,
+            "dimming": self._dimming,
             "duration": self._duration,
             "curve": self._curve,
             "art": self._art,
@@ -207,6 +208,12 @@ class DimEffect(Effect):
         """Report whether the dimmer helper process is currently alive."""
         return self._running()
 
+    @property
+    @override
+    def affected_outputs(self) -> tuple[str, ...]:
+        """Return the outputs selected by the latest accepted `DIM` command."""
+        return self._affected_outputs
+
     @override
     def apply(self, game_output: str, other_outputs: list[str], appid: str) -> bool:
         """Dispatch effect state to the dimmer helper.
@@ -219,9 +226,20 @@ class DimEffect(Effect):
             self.revert()
             return True
 
-        targets = sorted(other_outputs)
+        connected = sorted(other_outputs)
         identities = output_identities() if self._resolved_config is not None else {}
-        settings = {output: self._settings_for(output, identities) for output in targets}
+        settings = {output: self._settings_for(output, identities) for output in connected}
+
+        # Zero dimming leaves a display untouched whether or not artwork is enabled.
+        # Dropping the output from the dimmed set routes it through the helper's fade-out
+        # path; sending a zero-alpha overlay instead would stage artwork over it.
+        targets = [output for output in connected if settings[output].dimming > 0.0]
+        if skipped := [output for output in connected if settings[output].dimming <= 0.0]:
+            log.info("leaving untouched (dimming is zero): %s", ", ".join(skipped))
+        if not targets:
+            log.info("every secondary output has dimming set to zero")
+            self.revert()
+            return True
 
         # Identities carry display serial numbers, so keep the full dump at debug level.
         if identities and log.isEnabledFor(logging.DEBUG):
@@ -245,11 +263,9 @@ class DimEffect(Effect):
             render_size = artwork_render_size(*output_size) if output_size else None
             artwork = None
             if appid and render_size:
-                request = (appid, *render_size, resolved.dim_factor)
+                request = (appid, *render_size, resolved.dimming)
                 if request not in artwork_requests:
-                    artwork_requests[request] = build_artwork(
-                        appid, *render_size, resolved.dim_factor
-                    )
+                    artwork_requests[request] = build_artwork(appid, *render_size, resolved.dimming)
                 artwork = artwork_requests[request]
             if not self._send(self.art_command(output, artwork, render_size)):
                 return False
@@ -260,18 +276,19 @@ class DimEffect(Effect):
         # values and every other output fades out. Outputs whose resolved settings differ
         # are then retuned individually, which leaves the rest of the set untouched.
         joined = ",".join(targets)
-        batched = f"DIM {joined} {self._dim_factor:.3f} {self._duration:.2f} {self._curve}"
+        batched = f"DIM {joined} {self._dimming:.3f} {self._duration:.2f} {self._curve}"
         if not self._send(batched):
             return False
         self._dimmed = True
+        self._affected_outputs = tuple(targets)
 
-        globals_ = (self._dim_factor, self._duration, self._curve)
+        globals_ = (self._dimming, self._duration, self._curve)
         for output in targets:
             resolved = settings[output]
-            if (resolved.dim_factor, resolved.duration, resolved.curve) == globals_:
+            if (resolved.dimming, resolved.duration, resolved.curve) == globals_:
                 continue
             if not self._send(
-                f"DIM_OUTPUT {output} {resolved.dim_factor:.3f}"
+                f"DIM_OUTPUT {output} {resolved.dimming:.3f}"
                 f" {resolved.duration:.2f} {resolved.curve}"
             ):
                 return False
@@ -280,7 +297,7 @@ class DimEffect(Effect):
             "cinematic dimming on [%s] (factor=%.2f, duration=%.1fs, curve=%s, placement=%s,"
             " artwork on: %s)",
             ", ".join(targets),
-            self._dim_factor,
+            self._dimming,
             self._duration,
             self._curve,
             self._placement,
@@ -299,6 +316,7 @@ class DimEffect(Effect):
         log.info("restoring displays (fade_out duration=%.1fs)", 0.0 if immediate else duration)
         self._send(f"FADE_OUT {duration:.3f} {self._curve}", start=False)
         self._dimmed = False
+        self._affected_outputs = ()
 
         if immediate:
             self.shutdown()

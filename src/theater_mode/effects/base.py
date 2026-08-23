@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from theater_mode.config.schema import (
     DEFAULT_CURVE,
-    DEFAULT_DIM_FACTOR,
+    DEFAULT_DIMMING,
     DEFAULT_DURATION,
     DEFAULT_PLACEMENT,
 )
@@ -22,7 +22,7 @@ class EffectOptions:
     """Configuration options passed to effect initializers."""
 
     placement: str = DEFAULT_PLACEMENT
-    dim_factor: float = DEFAULT_DIM_FACTOR
+    dimming: float = DEFAULT_DIMMING
     dim_duration: float = DEFAULT_DURATION
     dim_curve: str = DEFAULT_CURVE
     art: bool = True
@@ -33,7 +33,7 @@ class EffectOptions:
         """Create options directly from a ResolvedConfig object."""
         return cls(
             placement=config.effect.placement,
-            dim_factor=config.effect.dim_factor,
+            dimming=config.effect.dimming,
             dim_duration=config.transition.duration,
             dim_curve=config.transition.curve,
             art=config.effect.art,
@@ -68,6 +68,11 @@ class Effect(ABC):
     def is_running(self) -> bool:
         """Report whether a stateful effect engine is currently running."""
         return True
+
+    @property
+    def affected_outputs(self) -> tuple[str, ...]:
+        """Return the outputs whose applied state still requires the effect engine."""
+        return ()
 
     def cancel_pending(self) -> None:
         """Cancel any queued asynchronous or timed transitions without reverting active state."""

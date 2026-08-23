@@ -93,16 +93,16 @@ class TestServiceDispatch(unittest.TestCase):
         self.mock_daemon.get_diagnostics.assert_called_once()
 
         self.mock_daemon.preview.return_value = "Previewed"
-        self._call("Preview", FakeVariant('{"effect.dim_factor": 0.5}'))
-        self.mock_daemon.preview.assert_called_once_with('{"effect.dim_factor": 0.5}')
+        self._call("Preview", FakeVariant('{"effect.dimming": 0.5}'))
+        self.mock_daemon.preview.assert_called_once_with('{"effect.dimming": 0.5}')
 
         self.mock_daemon.revert_preview.return_value = "Reverted"
         self._call("RevertPreview")
         self.mock_daemon.revert_preview.assert_called_once()
 
         self.mock_daemon.commit.return_value = "Committed"
-        self._call("Commit", FakeVariant('{"effect.dim_factor": 0.5}'))
-        self.mock_daemon.commit.assert_called_once_with('{"effect.dim_factor": 0.5}')
+        self._call("Commit", FakeVariant('{"effect.dimming": 0.5}'))
+        self.mock_daemon.commit.assert_called_once_with('{"effect.dimming": 0.5}')
 
         self.mock_daemon.reload.return_value = "Reloaded"
         self._call("Reload")

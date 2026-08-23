@@ -12,7 +12,7 @@ VALID_EASING_CURVES: frozenset[str] = frozenset({"sine", "quad", "cubic", "linea
 VALID_PLACEMENTS: frozenset[str] = frozenset({"over_windows", "behind_windows"})
 
 DEFAULT_PLACEMENT = "over_windows"
-DEFAULT_DIM_FACTOR = 0.85
+DEFAULT_DIMMING = 0.85
 DEFAULT_ART = True
 
 DEFAULT_DURATION = 2.0
@@ -45,13 +45,13 @@ EFFECT_FIELDS: dict[str, FieldSpec] = {
         choices=VALID_PLACEMENTS,
         doc="Where the effect sits: 'over_windows' covers whatever is on the display, blocking its light; 'behind_windows' paints on the desktop behind your open windows, which stay visible and usable.",
     ),
-    "dim_factor": FieldSpec(
-        key="dim_factor",
+    "dimming": FieldSpec(
+        key="dimming",
         type_name="float",
-        default=DEFAULT_DIM_FACTOR,
+        default=DEFAULT_DIMMING,
         min_value=0.0,
         max_value=1.0,
-        doc="Fraction of brightness to remove (0.0 = untouched, 1.0 = solid black, 0.85 = 15% brightness). With placement 'over_windows' this dims everything on the display; with 'behind_windows' it only darkens what is drawn behind your windows, where a much lower value usually reads better.",
+        doc="How dark this display becomes: 0.0 leaves it untouched, 0.85 leaves 15% brightness, and 1.0 is solid black. With artwork enabled the value sets how darkly the artwork is drawn; with artwork off it sets how much of your desktop stays visible. Under placement 'behind_windows' it applies only behind your open windows, where a lower value usually reads better.",
     ),
     "art": FieldSpec(
         key="art",
@@ -119,13 +119,13 @@ class EffectConfig:
     """Resolved global effect settings."""
 
     placement: str = DEFAULT_PLACEMENT
-    dim_factor: float = DEFAULT_DIM_FACTOR
+    dimming: float = DEFAULT_DIMMING
     art: bool = DEFAULT_ART
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "placement": self.placement,
-            "dim_factor": self.dim_factor,
+            "dimming": self.dimming,
             "art": self.art,
         }
 
@@ -165,7 +165,7 @@ class OutputOverrideConfig:
     """Per-output overrides for effect and transition leaves."""
 
     placement: str | None = None
-    dim_factor: float | None = None
+    dimming: float | None = None
     art: bool | None = None
     duration: float | None = None
     curve: str | None = None
@@ -173,7 +173,7 @@ class OutputOverrideConfig:
     def to_dict(self) -> dict[str, Any]:
         return {
             field: val
-            for field in ("placement", "dim_factor", "art", "duration", "curve")
+            for field in ("placement", "dimming", "art", "duration", "curve")
             if (val := getattr(self, field)) is not None
         }
 
@@ -184,7 +184,7 @@ class ResolvedDisplaySettings:
 
     output_id: str
     placement: str
-    dim_factor: float
+    dimming: float
     art: bool
     duration: float
     curve: str
@@ -224,9 +224,7 @@ class ResolvedConfig:
             output_id=output_name,
             matched_key=matched_key,
             placement=(self.effect.placement if override.placement is None else override.placement),
-            dim_factor=(
-                self.effect.dim_factor if override.dim_factor is None else override.dim_factor
-            ),
+            dimming=(self.effect.dimming if override.dimming is None else override.dimming),
             art=self.effect.art if override.art is None else override.art,
             duration=(self.transition.duration if override.duration is None else override.duration),
             curve=self.transition.curve if override.curve is None else override.curve,

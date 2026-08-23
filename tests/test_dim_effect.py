@@ -55,7 +55,7 @@ class DimEffectTestCase(unittest.TestCase):
 
 class TestDimCommands(DimEffectTestCase):
     def test_apply_stages_artwork_before_dimming(self) -> None:
-        effect = DimEffect(dim_factor=0.85, duration=2.0, curve="sine")
+        effect = DimEffect(dimming=0.85, duration=2.0, curve="sine")
         self.assertEqual(effect.name, "dim")
 
         effect.apply("DP-1", ["DP-3", "DP-2"], "1245620")
@@ -72,7 +72,7 @@ class TestDimCommands(DimEffectTestCase):
         )
 
     def test_artwork_buffers_are_capped_at_1080p(self) -> None:
-        effect = DimEffect(dim_factor=0.85)
+        effect = DimEffect(dimming=0.85)
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
 
         self.assertEqual(
@@ -80,8 +80,8 @@ class TestDimCommands(DimEffectTestCase):
             [("1245620", 1920, 1080, 0.85)],
         )
 
-    def test_dim_factor_is_part_of_the_artwork_request(self) -> None:
-        DimEffect(dim_factor=0.4).apply("DP-1", ["DP-2"], "1245620")
+    def test_dimming_is_part_of_the_artwork_request(self) -> None:
+        DimEffect(dimming=0.4).apply("DP-1", ["DP-2"], "1245620")
         self.assertEqual(self.build_artwork.call_args.args, ("1245620", 1920, 1080, 0.4))
 
     def test_revert_fades_out(self) -> None:
@@ -93,7 +93,7 @@ class TestDimCommands(DimEffectTestCase):
         self.assertEqual(written(self.process), ["FADE_OUT 2.000 sine"])
 
     def test_revert_immediate_also_quits_the_helper(self) -> None:
-        effect = DimEffect(dim_factor=0.80, duration=1.5)
+        effect = DimEffect(dimming=0.80, duration=1.5)
         effect.apply("DP-1", ["DP-2"], "1245620")
 
         self.process.stdin.write.reset_mock()
@@ -108,7 +108,7 @@ class TestDimCommands(DimEffectTestCase):
 class TestPerOutputSettings(DimEffectTestCase):
     def config(self, **overrides: OutputOverrideConfig) -> ResolvedConfig:
         return ResolvedConfig(
-            effect=EffectConfig(dim_factor=0.85, art=False),
+            effect=EffectConfig(dimming=0.85, art=False),
             transition=TransitionConfig(duration=2.0, curve="sine"),
             outputs=dict(overrides),
         )
@@ -117,7 +117,7 @@ class TestPerOutputSettings(DimEffectTestCase):
         """A per-output override must not fade the other secondary displays back out."""
         effect = DimEffect(
             art=False,
-            resolved_config=self.config(**{"DP-3": OutputOverrideConfig(dim_factor=0.4)}),
+            resolved_config=self.config(**{"DP-3": OutputOverrideConfig(dimming=0.4)}),
         )
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
 
@@ -125,6 +125,31 @@ class TestPerOutputSettings(DimEffectTestCase):
         self.assertIn("DIM DP-2,DP-3 0.850 2.00 sine", commands)
         self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)
         self.assertNotIn("DIM DP-3 0.400 2.00 sine", commands)
+
+    def test_zero_dimming_leaves_one_output_untouched(self) -> None:
+        effect = DimEffect(
+            art=False,
+            resolved_config=self.config(**{"DP-3": OutputOverrideConfig(dimming=0.0)}),
+        )
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        commands = written(self.process)
+        self.assertEqual(commands, ["LAYER DP-2 overlay", "ART DP-2", "DIM DP-2 0.850 2.00 sine"])
+        self.assertFalse([c for c in commands if "DP-3" in c])
+        self.assertEqual(effect.affected_outputs, ("DP-2",))
+
+    def test_zero_dimming_everywhere_reverts_instead_of_dimming(self) -> None:
+        effect = DimEffect(
+            art=False,
+            resolved_config=ResolvedConfig(
+                effect=EffectConfig(dimming=0.0, art=False),
+                transition=TransitionConfig(duration=2.0, curve="sine"),
+            ),
+        )
+        effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
+
+        self.assertFalse([c for c in written(self.process) if c.startswith(("DIM", "ART"))])
+        self.assertEqual(effect.affected_outputs, ())
 
     def test_outputs_matching_the_globals_are_not_retuned(self) -> None:
         effect = DimEffect(art=False, resolved_config=self.config())
@@ -172,7 +197,7 @@ class TestPerOutputSettings(DimEffectTestCase):
         effect = DimEffect(
             art=False,
             resolved_config=self.config(
-                **{"DEL:DELL S2721QS:AAA1111": OutputOverrideConfig(dim_factor=0.4)}
+                **{"DEL:DELL S2721QS:AAA1111": OutputOverrideConfig(dimming=0.4)}
             ),
         )
 
@@ -182,7 +207,7 @@ class TestPerOutputSettings(DimEffectTestCase):
         matched = [line for line in logs.output if "matched" in line]
         self.assertEqual(len(matched), 1)
         self.assertIn('[outputs."DEL:DELL S2721QS:AAA1111"]', matched[0])
-        self.assertIn("dim_factor=0.4", matched[0])
+        self.assertIn("dimming=0.4", matched[0])
 
     def test_outputs_without_a_rule_are_not_logged(self) -> None:
         effect = DimEffect(art=False, resolved_config=self.config())
@@ -202,8 +227,8 @@ class TestPerOutputSettings(DimEffectTestCase):
             art=False,
             resolved_config=self.config(
                 **{
-                    "DEL:DELL S2721QS:BBB2222": OutputOverrideConfig(dim_factor=0.4),
-                    "DP-2": OutputOverrideConfig(dim_factor=0.7),
+                    "DEL:DELL S2721QS:BBB2222": OutputOverrideConfig(dimming=0.4),
+                    "DP-2": OutputOverrideConfig(dimming=0.7),
                 }
             ),
         )
@@ -213,11 +238,11 @@ class TestPerOutputSettings(DimEffectTestCase):
         self.assertIn("DIM_OUTPUT DP-2 0.700 2.00 sine", commands)
         self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)
 
-    def test_per_output_dim_factor_reaches_the_artwork(self) -> None:
+    def test_per_output_dimming_reaches_the_artwork(self) -> None:
         effect = DimEffect(
             resolved_config=ResolvedConfig(
-                effect=EffectConfig(dim_factor=0.85, art=True),
-                outputs={"DP-3": OutputOverrideConfig(dim_factor=0.4)},
+                effect=EffectConfig(dimming=0.85, art=True),
+                outputs={"DP-3": OutputOverrideConfig(dimming=0.4)},
             )
         )
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")

@@ -6,20 +6,27 @@
 # which defaults to /etc/xdg.
 #
 # To modify settings live via D-Bus without editing this file directly:
-#   theater-mode config set effect.dim_factor 0.75
+#   theater-mode config set effect.dimming 0.75
 #   theater-mode config preview effect.placement behind_windows
 #
 
 [effect]
-# Where the effect sits: 'over_windows' covers whatever is on the display, blocking its light; 'behind_windows' paints on the desktop behind your open windows, which stay visible and usable.
+# Where the effect sits: 'over_windows' covers whatever is on the display,
+# blocking its light; 'behind_windows' paints on the desktop behind your open
+# windows, which stay visible and usable.
 # Options: ["behind_windows", "over_windows"]
 placement = "over_windows"
 
-# Fraction of brightness to remove (0.0 = untouched, 1.0 = solid black, 0.85 = 15% brightness). With placement 'over_windows' this dims everything on the display; with 'behind_windows' it only darkens what is drawn behind your windows, where a much lower value usually reads better.
+# How dark this display becomes: 0.0 leaves it untouched, 0.85 leaves 15%
+# brightness, and 1.0 is solid black. With artwork enabled the value sets how
+# darkly the artwork is drawn; with artwork off it sets how much of your
+# desktop stays visible. Under placement 'behind_windows' it applies only
+# behind your open windows, where a lower value usually reads better.
 # Range: [min: 0.0, max: 1.0]
-dim_factor = 0.85
+dimming = 0.85
 
-# Show active Steam game library hero artwork on secondary displays (true) or flat dark color (false).
+# Show active Steam game library hero artwork on secondary displays (true) or
+# flat dark color (false).
 art = true
 
 
@@ -28,17 +35,20 @@ art = true
 # Range: [min: 0.01, max: 60.0]
 duration = 2.0
 
-# Mathematical easing curve for fade transitions: 'sine', 'quad', 'cubic', or 'linear'.
+# Mathematical easing curve for fade transitions: 'sine', 'quad', 'cubic', or
+# 'linear'.
 # Options: ["cubic", "linear", "quad", "sine"]
 curve = "sine"
 
 
 [daemon]
-# Grace period in seconds before restoring displays after all game windows close (0 disables delay).
+# Grace period in seconds before restoring displays after all game windows
+# close (0 disables delay).
 # Range: [min: 0.0, max: 300.0]
 revert_delay = 3.0
 
-# Stability delay in seconds before following a game window when it moves to a different display.
+# Stability delay in seconds before following a game window when it moves to a
+# different display.
 # Range: [min: 0.0, max: 60.0]
 stage_delay = 1.5
 
@@ -48,7 +58,7 @@ require_fullscreen = false
 # -----------------------------------------------------------------------------
 # Per-Output Overrides (Optional)
 #
-# Overridable keys: placement, dim_factor, art, duration, curve
+# Overridable keys: placement, dimming, art, duration, curve
 #
 # Outputs are matched in this order, and the first section that exists wins:
 #   1. make:model:serial  - pins one physical panel, even among identical models
@@ -59,12 +69,12 @@ require_fullscreen = false
 # -----------------------------------------------------------------------------
 #
 # [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
-# dim_factor = 0.90
+# dimming = 0.90
 #
 # [outputs."Dell Inc.:DELL S2721QS"]
 # art = false
 #
 # [outputs.DP-2]
-# dim_factor = 0.50
+# dimming = 0.50
 # duration = 1.0
 #

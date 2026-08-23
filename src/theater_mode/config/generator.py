@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import textwrap
+
 from theater_mode.config.schema import SCHEMA_TABLES, FieldSpec
 from theater_mode.config.writer import format_toml_value
 
@@ -14,14 +16,15 @@ HEADER = """\
 # which defaults to /etc/xdg.
 #
 # To modify settings live via D-Bus without editing this file directly:
-#   theater-mode config set effect.dim_factor 0.75
+#   theater-mode config set effect.dimming 0.75
 #   theater-mode config preview effect.placement behind_windows
 #"""
 
 
 def _document(field_name: str, spec: FieldSpec) -> list[str]:
     """Render one schema leaf as commented documentation plus its default assignment."""
-    lines = [f"# {spec.doc}"]
+    # Wrap to the width of the section rules below, which are 79 columns including the '# '.
+    lines = [f"# {line}" for line in textwrap.wrap(spec.doc, width=77)]
     if spec.choices:
         lines.append("# Options: [" + ", ".join(f'"{c}"' for c in sorted(spec.choices)) + "]")
 
@@ -66,13 +69,13 @@ def generate_reference_config() -> str:
         "# " + "-" * 77,
         "#",
         '# [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]',
-        "# dim_factor = 0.90",
+        "# dimming = 0.90",
         "#",
         '# [outputs."Dell Inc.:DELL S2721QS"]',
         "# art = false",
         "#",
         "# [outputs.DP-2]",
-        "# dim_factor = 0.50",
+        "# dimming = 0.50",
         "# duration = 1.0",
         "#",
     ]

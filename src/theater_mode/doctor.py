@@ -25,9 +25,11 @@ from theater_mode.constants import (
     KWIN_CONFIG_FILE,
     KWIN_PLUGIN_ID,
     KWIN_SCRIPT_DIR,
+    PROJECT_REPO,
     SERVICE_UNIT,
     STEAM_LIBRARY_CACHES,
 )
+from theater_mode.utils import plural
 
 OK = "ok"
 WARN = "warn"
@@ -192,7 +194,9 @@ def _helper_check(section: str, name: str, binary: Path | None, run: Runner) -> 
             name,
             FAIL,
             "not found",
-            f"Reinstall theater-mode to restore {name}, or compile locally with: ./install.sh --build",
+            f"Reinstall theater-mode to restore {name}. If that fails, build it for this "
+            f"machine: curl -fsSL https://raw.githubusercontent.com/{PROJECT_REPO}/main/get.sh "
+            "| bash -s -- --build",
         )
 
     rc, out = run([str(binary), "--version"])
@@ -200,7 +204,11 @@ def _helper_check(section: str, name: str, binary: Path | None, run: Runner) -> 
         detail = out.splitlines()[0] if out else "did not run"
         hint = f"The installed {name} cannot run on this machine: {detail}"
         if "GLIBC" in out:
-            hint += ". Rebuild locally with: ./install.sh --build"
+            hint += (
+                f". Build one for this machine: curl -fsSL "
+                f"https://raw.githubusercontent.com/{PROJECT_REPO}/main/get.sh "
+                "| bash -s -- --build"
+            )
         return Check(section, name, FAIL, _tilde(binary), hint)
 
     reported = out.split()[-1] if out else ""
@@ -394,7 +402,7 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
                     section,
                     "Configuration",
                     FAIL,
-                    f"{errors} error(s), {warnings} warning(s)",
+                    f"{plural(errors, 'error')}, {plural(warnings, 'warning')}",
                     "Run: theater-mode config diagnostics",
                 )
             )
@@ -404,7 +412,7 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
                     section,
                     "Configuration",
                     WARN,
-                    f"{warnings} warning(s)",
+                    f"{plural(warnings, 'warning')}",
                     "Run: theater-mode config diagnostics",
                 )
             )
@@ -423,7 +431,7 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
                         section,
                         "Configuration",
                         FAIL,
-                        f"{errors} error(s), {warnings} warning(s)",
+                        f"{plural(errors, 'error')}, {plural(warnings, 'warning')}",
                         "Run: theater-mode config diagnostics",
                     )
                 )
@@ -433,7 +441,7 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
                         section,
                         "Configuration",
                         WARN,
-                        f"{warnings} warning(s)",
+                        f"{plural(warnings, 'warning')}",
                         "Run: theater-mode config diagnostics",
                     )
                 )
@@ -442,6 +450,14 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
         except Exception as e:
             checks.append(Check(section, "Configuration", FAIL, "syntax error", str(e)))
 
+    raw_resolved = _probe(call_dbus, "GetResolved") if status is not None else None
+    resolved: dict[str, object] = {}
+    if raw_resolved:
+        try:
+            resolved = json.loads(raw_resolved)
+        except (TypeError, ValueError):
+            resolved = {}
+
     raw_outputs = _probe(call_dbus, "GetOutputs") if status is not None else None
     outputs: list[dict[str, object]] = []
     if raw_outputs:
@@ -449,6 +465,32 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
             outputs = json.loads(raw_outputs)
         except (TypeError, ValueError):
             outputs = []
+
+    effect_table = resolved.get("effect", {}) if isinstance(resolved, dict) else {}
+    output_tables = resolved.get("outputs", {}) if isinstance(resolved, dict) else {}
+    if isinstance(effect_table, dict) and isinstance(output_tables, dict) and outputs:
+        global_dimming = effect_table.get("dimming")
+        effective_dimming: list[object] = []
+        for output in outputs:
+            connector = str(output.get("connector", ""))
+            candidates = [*(output.get("match_keys") or []), connector]
+            matched = next((key for key in candidates if key in output_tables), None)
+            table = output_tables.get(matched, {}) if matched is not None else {}
+            value = (
+                table.get("dimming", global_dimming) if isinstance(table, dict) else global_dimming
+            )
+            effective_dimming.append(value)
+        if effective_dimming and all(value == 0 for value in effective_dimming):
+            checks.append(
+                Check(
+                    section,
+                    "Dimming",
+                    WARN,
+                    "zero on every display",
+                    "No display is changed while dimming is zero. Raise it with: "
+                    "theater-mode config set effect.dimming 0.85",
+                )
+            )
 
     if not outputs and status is None:
         try:
@@ -556,9 +598,9 @@ def format_report(checks: list[Check]) -> str:
     warnings = sum(1 for c in checks if c.status == WARN)
     lines.append("")
     if failures:
-        lines.append(f"{failures} problem(s) found. Address the FAIL lines above first.")
+        lines.append(f"{plural(failures, 'problem')} found. Address the FAIL lines above first.")
     elif warnings:
-        lines.append(f"No blocking problems. {warnings} thing(s) worth a look.")
+        lines.append(f"No blocking problems. {plural(warnings, 'thing')} worth a look.")
     else:
         lines.append("Everything checks out.")
     return "\n".join(lines).lstrip("\n")

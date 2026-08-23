@@ -20,10 +20,10 @@ class TestRemoveTomlKeys(unittest.TestCase):
     """The writer is format-preserving, so removal must disturb nothing but the key line."""
 
     def test_removes_only_the_targeted_key(self) -> None:
-        original = '[effect]\ndim_factor = 0.80\nplacement = "behind_windows"\n'
+        original = '[effect]\ndimming = 0.80\nplacement = "behind_windows"\n'
         text, removed = remove_toml_keys(original, {"effect.placement"})
         self.assertEqual(removed, {"effect.placement"})
-        self.assertEqual(text, "[effect]\ndim_factor = 0.80\n")
+        self.assertEqual(text, "[effect]\ndimming = 0.80\n")
 
     def test_preserves_comments_blank_lines_and_headers(self) -> None:
         original = (
@@ -31,54 +31,54 @@ class TestRemoveTomlKeys(unittest.TestCase):
             "\n"
             "[effect]\n"
             "# how dark the other screens go\n"
-            "dim_factor = 0.80  # trailing\n"
+            "dimming = 0.80  # trailing\n"
             'placement = "behind_windows"\n'
             "\n"
             '#[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]\n'
-            "#dim_factor = 0.3\n"
+            "#dimming = 0.3\n"
         )
         text, removed = remove_toml_keys(original, {"effect.placement"})
         self.assertEqual(removed, {"effect.placement"})
         self.assertIn("# top of file", text)
         self.assertIn("# how dark the other screens go", text)
-        self.assertIn("dim_factor = 0.80  # trailing", text)
+        self.assertIn("dimming = 0.80  # trailing", text)
         self.assertIn('#[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]', text)
         self.assertNotIn("placement", text)
 
     def test_only_removes_from_the_matching_table(self) -> None:
-        original = "[effect]\ndim_factor = 0.5\n\n[outputs.DP-1]\ndim_factor = 0.9\n"
-        text, removed = remove_toml_keys(original, {"outputs.DP-1.dim_factor"})
-        self.assertEqual(removed, {"outputs.DP-1.dim_factor"})
-        self.assertIn("[effect]\ndim_factor = 0.5", text)
+        original = "[effect]\ndimming = 0.5\n\n[outputs.DP-1]\ndimming = 0.9\n"
+        text, removed = remove_toml_keys(original, {"outputs.DP-1.dimming"})
+        self.assertEqual(removed, {"outputs.DP-1.dimming"})
+        self.assertIn("[effect]\ndimming = 0.5", text)
         self.assertNotIn("0.9", text)
 
     def test_quoted_output_table_with_dots_in_the_id(self) -> None:
-        original = '[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]\ndim_factor = 0.3\n'
+        original = '[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]\ndimming = 0.3\n'
         text, removed = remove_toml_keys(
-            original, {"outputs.Dell Inc.:DELL S2721QS:4QCPZY3.dim_factor"}
+            original, {"outputs.Dell Inc.:DELL S2721QS:4QCPZY3.dimming"}
         )
-        self.assertEqual(removed, {"outputs.Dell Inc.:DELL S2721QS:4QCPZY3.dim_factor"})
-        self.assertNotIn("dim_factor", text)
+        self.assertEqual(removed, {"outputs.Dell Inc.:DELL S2721QS:4QCPZY3.dimming"})
+        self.assertNotIn("dimming", text)
         self.assertIn("[outputs.", text)
 
     def test_absent_key_reports_nothing_removed_and_changes_nothing(self) -> None:
-        original = "[effect]\ndim_factor = 0.5\n"
+        original = "[effect]\ndimming = 0.5\n"
         text, removed = remove_toml_keys(original, {"effect.placement"})
         self.assertEqual(removed, set())
         self.assertEqual(text, original)
 
     def test_emptied_table_keeps_its_header(self) -> None:
-        original = "# my monitor\n[outputs.DP-1]\ndim_factor = 0.3\n"
-        text, removed = remove_toml_keys(original, {"outputs.DP-1.dim_factor"})
-        self.assertEqual(removed, {"outputs.DP-1.dim_factor"})
+        original = "# my monitor\n[outputs.DP-1]\ndimming = 0.3\n"
+        text, removed = remove_toml_keys(original, {"outputs.DP-1.dimming"})
+        self.assertEqual(removed, {"outputs.DP-1.dimming"})
         self.assertIn("# my monitor", text)
         self.assertIn("[outputs.DP-1]", text)
 
     def test_multiple_keys_across_tables(self) -> None:
-        original = '[effect]\ndim_factor = 0.5\nplacement = "behind_windows"\n\n[daemon]\nrevert_delay = 2.0\n'
+        original = '[effect]\ndimming = 0.5\nplacement = "behind_windows"\n\n[daemon]\nrevert_delay = 2.0\n'
         text, removed = remove_toml_keys(original, {"effect.placement", "daemon.revert_delay"})
         self.assertEqual(removed, {"effect.placement", "daemon.revert_delay"})
-        self.assertIn("dim_factor = 0.5", text)
+        self.assertIn("dimming = 0.5", text)
         self.assertNotIn("revert_delay", text)
 
     def test_malformed_key_path_is_rejected(self) -> None:
@@ -93,21 +93,21 @@ class TestUnsetUserConfig(unittest.TestCase):
         self.path = Path(self._tmp.name) / "config.toml"
 
     def test_missing_file_is_not_an_error(self) -> None:
-        ok, msg, removed = unset_user_config({"effect.dim_factor"}, self.path)
+        ok, msg, removed = unset_user_config({"effect.dimming"}, self.path)
         self.assertTrue(ok)
         self.assertEqual(removed, set())
         self.assertIn("No user configuration file", msg)
 
     def test_removes_and_rewrites_atomically(self) -> None:
-        self.path.write_text('[effect]\ndim_factor = 0.8\nplacement = "behind_windows"\n')
-        ok, _msg, removed = unset_user_config({"effect.dim_factor"}, self.path)
+        self.path.write_text('[effect]\ndimming = 0.8\nplacement = "behind_windows"\n')
+        ok, _msg, removed = unset_user_config({"effect.dimming"}, self.path)
         self.assertTrue(ok)
-        self.assertEqual(removed, {"effect.dim_factor"})
+        self.assertEqual(removed, {"effect.dimming"})
         self.assertEqual(self.path.read_text(), '[effect]\nplacement = "behind_windows"\n')
         self.assertEqual([p.name for p in self.path.parent.iterdir()], ["config.toml"])
 
     def test_no_matching_key_leaves_the_file_untouched(self) -> None:
-        original = "[effect]\ndim_factor = 0.8\n"
+        original = "[effect]\ndimming = 0.8\n"
         self.path.write_text(original)
         ok, msg, removed = unset_user_config({"effect.placement"}, self.path)
         self.assertTrue(ok)
@@ -128,37 +128,35 @@ class TestDaemonUnset(unittest.TestCase):
         )
 
     def test_unset_removes_a_committed_key_and_reloads(self) -> None:
-        self.daemon.commit('{"effect.dim_factor": 0.4}')
-        self.assertEqual(self.daemon.config.effect.dim_factor, 0.4)
+        self.daemon.commit('{"effect.dimming": 0.4}')
+        self.assertEqual(self.daemon.config.effect.dimming, 0.4)
 
-        result = self.daemon.unset('["effect.dim_factor"]')
-        self.assertIn("unset 1 keys", result)
-        self.assertNotIn("dim_factor", self.path.read_text())
-        self.assertNotEqual(self.daemon.config.effect.dim_factor, 0.4)
+        result = self.daemon.unset('["effect.dimming"]')
+        self.assertIn("unset 1 key", result)
+        self.assertNotIn("dimming", self.path.read_text())
+        self.assertNotEqual(self.daemon.config.effect.dimming, 0.4)
 
     def test_unset_quoted_output_key(self) -> None:
-        self.daemon.commit(json.dumps({'outputs."Dell Inc.:DELL S2721QS:4QCPZY3".dim_factor': 0.3}))
-        result = self.daemon.unset(
-            json.dumps(['outputs."Dell Inc.:DELL S2721QS:4QCPZY3".dim_factor'])
-        )
-        self.assertEqual(result, "unset 1 keys")
-        self.assertNotIn("dim_factor", self.path.read_text())
+        self.daemon.commit(json.dumps({'outputs."Dell Inc.:DELL S2721QS:4QCPZY3".dimming': 0.3}))
+        result = self.daemon.unset(json.dumps(['outputs."Dell Inc.:DELL S2721QS:4QCPZY3".dimming']))
+        self.assertEqual(result, "unset 1 key")
+        self.assertNotIn("dimming", self.path.read_text())
 
     def test_unknown_key_is_rejected_rather_than_silently_accepted(self) -> None:
         result = self.daemon.unset('["effect.nonsense"]')
-        self.assertTrue(result.startswith("error: nothing to unset"))
+        self.assertTrue(result.startswith("error: no valid keys to unset"))
         self.assertIn("rejected:", result)
 
     def test_known_key_that_is_not_set_reports_already_unset(self) -> None:
-        result = self.daemon.unset('["effect.dim_factor"]')
+        result = self.daemon.unset('["effect.dimming"]')
         self.assertIn("unset 0 keys", result)
-        self.assertIn("already unset: effect.dim_factor", result)
+        self.assertIn("already unset: effect.dimming", result)
         self.assertFalse(result.startswith("error"))
 
     def test_mixed_known_and_unknown_keys(self) -> None:
-        self.daemon.commit('{"effect.dim_factor": 0.4}')
-        result = self.daemon.unset('["effect.dim_factor", "effect.bogus"]')
-        self.assertIn("unset 1 keys", result)
+        self.daemon.commit('{"effect.dimming": 0.4}')
+        result = self.daemon.unset('["effect.dimming", "effect.bogus"]')
+        self.assertIn("unset 1 key", result)
         self.assertIn("rejected:", result)
 
     def test_malformed_payloads(self) -> None:
@@ -172,7 +170,7 @@ class TestDaemonUnset(unittest.TestCase):
         invocation = MagicMock()
         handler = make_handler(self.daemon, lambda _sig, args: args)
         params = MagicMock()
-        params.unpack.return_value = ('["effect.dim_factor"]',)
+        params.unpack.return_value = ('["effect.dimming"]',)
         handler(None, "s", "/p", "i", "Unset", params, invocation)
         invocation.return_value.assert_called_once()
         self.assertIn("unset 0 keys", invocation.return_value.call_args[0][0][0])
@@ -187,31 +185,29 @@ class TestClientUnsetRouting(unittest.TestCase):
         return code, out.getvalue(), call
 
     def test_sends_key_list_and_reports_the_new_value(self) -> None:
-        resolved = {"effect": {"dim_factor": 0.75, "art": True}, "provenance": {}, "outputs": {}}
+        resolved = {"effect": {"dimming": 0.75, "art": True}, "provenance": {}, "outputs": {}}
         code, out, call = self._run(
-            ["config", "unset", "effect.dim_factor", "effect.art"],
+            ["config", "unset", "effect.dimming", "effect.art"],
             {"Unset": "unset 2 keys", "GetResolved": json.dumps(resolved)},
         )
         self.assertEqual(code, 0)
-        self.assertEqual(
-            call.call_args_list[0][0], ("Unset", '["effect.dim_factor", "effect.art"]')
-        )
-        self.assertIn("effect.dim_factor is now 0.75", out)
+        self.assertEqual(call.call_args_list[0][0], ("Unset", '["effect.dimming", "effect.art"]'))
+        self.assertIn("effect.dimming is now 0.75", out)
         self.assertIn("effect.art is now true", out)
 
     def test_accepts_several_keys_at_once(self) -> None:
         resolved = {
-            "effect": {"dim_factor": 0.75, "placement": "over_windows"},
+            "effect": {"dimming": 0.75, "placement": "over_windows"},
             "provenance": {},
             "outputs": {},
         }
         code, _out, call = self._run(
-            ["config", "unset", "effect.dim_factor", "effect.placement"],
+            ["config", "unset", "effect.dimming", "effect.placement"],
             {"Unset": "unset 2 of 2 keys", "GetResolved": json.dumps(resolved)},
         )
         self.assertEqual(code, 0)
         self.assertEqual(
-            json.loads(call.call_args_list[0][0][1]), ["effect.dim_factor", "effect.placement"]
+            json.loads(call.call_args_list[0][0][1]), ["effect.dimming", "effect.placement"]
         )
 
     def test_rejected_key_exits_nonzero(self) -> None:

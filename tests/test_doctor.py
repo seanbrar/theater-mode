@@ -36,6 +36,8 @@ def healthy_dbus(method: str, *_args: object) -> str:
         return "[]"
     if method == "GetOutputs":
         return json.dumps([{"connector": "DP-1"}, {"connector": "DP-2"}])
+    if method == "GetResolved":
+        return json.dumps({"effect": {"dimming": 0.85}, "outputs": {}})
     if method == "Status":
         return json.dumps(
             {
@@ -109,6 +111,15 @@ class DoctorTestCase(unittest.TestCase):
             p = patch(target, return_value=binary)
             p.start()
             self.addCleanup(p.stop)
+
+        # The offline fallback reads the real user config, so without this the
+        # Configuration check reports whatever is in the developer's home directory.
+        p = patch(
+            "theater_mode.config.loader.load_resolved_config",
+            return_value=(None, []),
+        )
+        p.start()
+        self.addCleanup(p.stop)
 
         self.addCleanup(self._tmp.cleanup)
 
@@ -224,7 +235,8 @@ class TestDoctorFindings(DoctorTestCase):
             checks = self.run_checks()
         art = next(c for c in checks if c.name == "theater-art")
         self.assertEqual(art.status, doctor.FAIL)
-        self.assertIn("install.sh", art.hint)
+        self.assertIn("get.sh", art.hint)
+        self.assertIn("--build", art.hint)
 
     def test_helper_that_cannot_run_reports_the_loader_error(self) -> None:
         def broken(cmd: list[str]) -> tuple[int, str]:
@@ -358,6 +370,37 @@ class TestDoctorCliRouting(DoctorTestCase):
 
         idle_checks = self.run_checks(call_dbus=healthy_dbus)
         self.assertNotIn("Display effect helper", [check.name for check in idle_checks])
+
+    def test_zero_dimming_uses_only_matching_connected_display_rules(self) -> None:
+        def zero_with_stale_override(method: str, *_args: object) -> str:
+            if method == "GetResolved":
+                return json.dumps(
+                    {
+                        "effect": {"dimming": 0.0},
+                        "outputs": {"DP-9": {"dimming": 0.8}},
+                    }
+                )
+            return healthy_dbus(method)
+
+        checks = self.run_checks(call_dbus=zero_with_stale_override)
+        self.assertEqual(self.status_of(checks, "Dimming"), doctor.WARN)
+
+    def test_zero_dimming_detects_connected_output_overrides(self) -> None:
+        def nullified_outputs(method: str, *_args: object) -> str:
+            if method == "GetResolved":
+                return json.dumps(
+                    {
+                        "effect": {"dimming": 0.85},
+                        "outputs": {
+                            "DP-1": {"dimming": 0.0},
+                            "DP-2": {"dimming": 0.0},
+                        },
+                    }
+                )
+            return healthy_dbus(method)
+
+        checks = self.run_checks(call_dbus=nullified_outputs)
+        self.assertEqual(self.status_of(checks, "Dimming"), doctor.WARN)
 
     def test_unreadable_status_is_reported(self) -> None:
         def bad_status(method: str, *_args: object) -> str:

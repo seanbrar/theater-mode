@@ -125,10 +125,10 @@ def prune_artwork_cache(
         pass
 
 
-def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Path | None:
+def build_artwork(appid: str, width: int, height: int, dimming: float) -> Path | None:
     """Return a cached raw ARGB8888 composite at the requested resolution.
 
-    The image has dim_factor baked into its brightness. Return None when source artwork or
+    The image has dimming baked into its brightness. Return None when source artwork or
     the helper is unavailable, rendering times out, or an I/O operation fails.
     """
     try:
@@ -136,7 +136,7 @@ def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Pat
         if source is None:
             return None
 
-        dim_millis = round(max(0.0, min(1.0, dim_factor)) * 1000)
+        dim_millis = round(max(0.0, min(1.0, dimming)) * 1000)
         target = (
             ART_CACHE / f"{appid}-v{ARTWORK_CACHE_VERSION}-{width}x{height}-d{dim_millis:04d}.argb"
         )

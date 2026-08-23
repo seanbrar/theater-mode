@@ -57,6 +57,7 @@ class TestDaemon(unittest.TestCase):
     def setUp(self) -> None:
         self.mock_effect = MagicMock()
         self.mock_effect.name = "dim"
+        self.mock_effect.affected_outputs = ()
 
         # Point both config layers at an empty temp dir so reloads never read the
         # developer's own ~/.config/theater-mode/config.toml.
@@ -151,29 +152,29 @@ class TestDaemon(unittest.TestCase):
         diags_json = self.daemon.get_diagnostics()
         self.assertEqual(diags_json, "[]")
 
-        prev_res = self.daemon.preview('{"effect.dim_factor": 0.33}')
+        prev_res = self.daemon.preview('{"effect.dimming": 0.33}')
         self.assertIn("preview applied", prev_res)
-        self.assertEqual(self.daemon.config.effect.dim_factor, 0.33)
+        self.assertEqual(self.daemon.config.effect.dimming, 0.33)
 
         revert_res = self.daemon.revert_preview()
         self.assertIn("preview reverted", revert_res)
-        self.assertEqual(self.daemon.config.effect.dim_factor, 0.85)
+        self.assertEqual(self.daemon.config.effect.dimming, 0.85)
 
         reload_res = self.daemon.reload()
         self.assertIn("reloaded", reload_res)
         self.assertEqual(self.daemon.config.daemon.revert_delay, 3.0)
 
     def test_invalid_keys_are_rejected_not_persisted(self) -> None:
-        result = self.daemon.commit('{"effect.dim_factor": 99.0, "effect.nonsense": 1}')
-        self.assertTrue(result.startswith("error: nothing to commit"))
+        result = self.daemon.commit('{"effect.dimming": 99.0, "effect.nonsense": 1}')
+        self.assertTrue(result.startswith("error: no valid settings to commit"))
         self.assertIn("exceeds maximum", result)
         self.assertIn("Unknown configuration key", result)
         self.assertFalse((self.daemon.dev_config.user_config_override).exists())
 
     def test_commit_persists_valid_keys(self) -> None:
-        result = self.daemon.commit('{"effect.dim_factor": 0.4}')
-        self.assertIn("committed 1 keys", result)
-        self.assertEqual(self.daemon.config.effect.dim_factor, 0.4)
+        result = self.daemon.commit('{"effect.dimming": 0.4}')
+        self.assertIn("committed 1 key", result)
+        self.assertEqual(self.daemon.config.effect.dimming, 0.4)
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
     def test_revert_delay_fades_out_after_timeout(self, _) -> None:
@@ -279,6 +280,7 @@ class TestDaemon(unittest.TestCase):
 
     def test_reconcile_recovers_when_effect_helper_dies(self) -> None:
         self.mock_effect.apply.return_value = True
+        self.mock_effect.affected_outputs = ("DP-2",)
         type(self.mock_effect).is_running = PropertyMock(return_value=True)
         self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
         self.assertEqual(self.daemon.active_output, "DP-1")
@@ -287,6 +289,27 @@ class TestDaemon(unittest.TestCase):
         type(self.mock_effect).is_running = PropertyMock(return_value=False)
         self.daemon.reconcile()
         self.assertEqual(self.mock_effect.apply.call_count, 2)
+
+    @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
+    def test_nullified_effect_does_not_require_a_helper(self, _) -> None:
+        self.mock_effect.apply.return_value = True
+        self.mock_effect.affected_outputs = ()
+        type(self.mock_effect).is_running = PropertyMock(return_value=False)
+
+        self.daemon.window_opened("win-game", "steam_app_100", "200", "DP-1", "true")
+        self.daemon.reconcile()
+
+        self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2"], "100")
+        status = json.loads(self.daemon.status())
+        self.assertEqual(status["affected_outputs"], [])
+        self.assertEqual(status["secondary_outputs"], ["DP-2"])
+
+    @patch("theater_mode.daemon.output_identities", return_value={})
+    @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
+    def test_commit_reports_when_all_connected_outputs_are_nullified(self, _, __) -> None:
+        result = self.daemon.commit('{"effect.dimming": 0}')
+
+        self.assertIn("dimming is zero on every connected display", result)
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1"})
     def test_single_display_does_not_require_an_effect_process(self, _) -> None:
