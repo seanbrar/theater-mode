@@ -38,22 +38,18 @@ class TestServiceDispatch(unittest.TestCase):
         )
 
     def test_window_lifecycle_methods(self) -> None:
-        # WindowOpened
         self._call("WindowOpened", FakeVariant("win-1", "steam_app_100", "1000", "DP-1", "true"))
         self.mock_daemon.window_opened.assert_called_once_with(
             "win-1", "steam_app_100", "1000", "DP-1", "true"
         )
         self.mock_invocation.return_value.assert_called_with(None)
 
-        # WindowChanged
         self._call("WindowChanged", FakeVariant("win-1", "DP-2", "true"))
         self.mock_daemon.window_changed.assert_called_once_with("win-1", "DP-2", "true")
 
-        # WindowClosed
         self._call("WindowClosed", FakeVariant("win-1"))
         self.mock_daemon.window_closed.assert_called_once_with("win-1")
 
-        # SnapshotBegin & SnapshotEnd
         self._call("SnapshotBegin", FakeVariant("DP-1,DP-2"))
         self.mock_daemon.snapshot_begin.assert_called_once_with("DP-1,DP-2")
         self._call("SnapshotEnd")

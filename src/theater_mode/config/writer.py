@@ -113,7 +113,6 @@ def update_toml_content(original_content: str, updates: dict[str, Any]) -> str:
             seen_keys.add(key_name)
 
             if key_name in table_updates.get(current_table, {}):
-                # Preserve indentation and any trailing comment.
                 indent = line[: len(line) - len(line.lstrip())]
                 comment = _trailing_comment(line.partition("=")[2])
                 value = table_updates[current_table][key_name]

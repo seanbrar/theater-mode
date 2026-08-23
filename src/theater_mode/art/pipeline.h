@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Maximum total pixel count allowed for source and target images (32 Megapixels). */
+/* Source and target images above this pixel count are rejected before allocation. */
 #define MAX_TOTAL_PIXELS (32 * 1024 * 1024)
 
 struct image_buffer {
@@ -29,19 +29,22 @@ struct mask_buffer {
     uint8_t *data;
 };
 
-/* Allocate an empty image buffer. Returns NULL if geometry is invalid or allocation fails. */
+/* Allocate an empty image buffer. Return NULL for invalid geometry or allocation failure. */
 struct image_buffer *image_buffer_create(int width, int height, int channels);
 
-/* Free an image buffer and its underlying pixel allocation. */
+/* Free an image buffer and its pixels. Accept NULL. */
 void image_buffer_free(struct image_buffer *buf);
 
-/* Load a JPEG or PNG from disk into an RGB24 image buffer. Returns NULL on failure or corrupt data. Caller owns the returned buffer. */
+/* Load a bounded, complete JPEG or PNG into RGB24. Return NULL for invalid input,
+ * an unreadable file, or allocation failure. The caller owns the returned buffer. */
 struct image_buffer *image_load(const char *path, size_t max_bytes);
 
-/* Resample an RGB image using separable bilinear filtering (support-scaled for downscaling). Returns NULL on allocation failure. Caller owns the returned buffer. */
+/* Resample RGB with a support-scaled triangle filter. Return NULL for invalid input
+ * or allocation failure. The caller owns the returned buffer. */
 struct image_buffer *image_resample_bilinear(const struct image_buffer *src, int dst_w, int dst_h);
 
-/* Resample an RGB image using separable Lanczos-3 sinc filtering. Returns NULL on allocation failure. Caller owns the returned buffer. */
+/* Resample RGB with Lanczos-3. Return NULL for invalid input or allocation failure.
+ * The caller owns the returned buffer. */
 struct image_buffer *image_resample_lanczos(const struct image_buffer *src, int dst_w, int dst_h);
 
 /* Apply 3-pass extended box blur (Kutskir integer-box Gaussian approximation) in place. */
@@ -50,13 +53,15 @@ void image_gaussian_blur(struct image_buffer *img, float radius);
 /* Multiply RGB channels by factor, clamping in [0, 255]. */
 void image_enhance_brightness(struct image_buffer *img, float factor);
 
-/* Generate 1D feather gradient mask. Caller owns the returned mask buffer. */
+/* Generate a 1D feather mask. Return NULL for invalid dimensions or allocation
+ * failure. The caller owns the returned mask. */
 struct mask_buffer *image_create_feather_mask(int length, int feather, bool horizontal);
 
-/* Free a feather mask buffer and its underlying table allocation. */
+/* Free a feather mask. Accept NULL. */
 void mask_buffer_free(struct mask_buffer *mask);
 
-/* Composite foreground over backdrop with optional feather mask. */
+/* Composite foreground over backdrop, clipping overhangs. A horizontal mask varies
+ * by x; a vertical mask varies by y. NULL selects fully opaque compositing. */
 void image_composite_over(
     struct image_buffer *backdrop,
     const struct image_buffer *foreground,
@@ -65,10 +70,12 @@ void image_composite_over(
     const struct mask_buffer *mask
 );
 
-/* Write the final image as raw ARGB8888 (BGRA byte order) atomically via deterministic .tmp. Returns 0 on success, non-zero on failure. */
+/* Atomically write raw ARGB8888 in BGRA byte order through `<target>.tmp`.
+ * Return 0 on success and nonzero for invalid input, allocation failure, or I/O failure. */
 int image_write_argb(const struct image_buffer *img, const char *target_path);
 
-/* Full backdrop rendering pipeline from input image to output ARGB using integer dim_millis (0..1000). Returns 0 on success, non-zero on failure. */
+/* Render a backdrop to raw ARGB. `dim_millis` must be in 0..1000. Return 0 on
+ * success and nonzero for invalid input, allocation failure, or an I/O failure. */
 int render_artwork_pipeline(
     const char *input_path,
     const char *output_path,

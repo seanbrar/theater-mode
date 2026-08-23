@@ -58,7 +58,8 @@ def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., 
             else:
                 invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)
         except Exception:
-            # Prevent unhandled exceptions in individual window events from terminating the daemon
+            # Contain each method failure at the D-Bus boundary so one event cannot
+            # terminate the daemon.
             log.exception("error handling D-Bus method %s", method)
             with contextlib.suppress(Exception):
                 invocation.return_dbus_error(f"{INTERFACE}.Failed", f"{method} failed")

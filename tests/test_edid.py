@@ -102,7 +102,6 @@ class TestMalformedEdid(unittest.TestCase):
         self.assertEqual(identity.match_keys, ())
 
     def test_empty_blob(self) -> None:
-        # Normal for sleeping displays, virtual outputs, and KVM switches.
         self.assert_connector_only(b"")
 
     def test_truncated_blob(self) -> None:

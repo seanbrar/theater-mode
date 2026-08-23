@@ -10,12 +10,9 @@ override LDFLAGS += -Wl,-z,relro,-z,now -pie
 # Paired with _DEFAULT_SOURCE in dimmer.c: both are required, neither is sufficient alone.
 STD = -std=gnu17
 
-# Ask pkg-config rather than hardcoding paths, so a libwayland installed under a
-# non-standard prefix builds too. install.sh checks for both before compiling.
 WAYLAND_CFLAGS := $(shell pkg-config --cflags wayland-client)
 WAYLAND_LIBS := $(shell pkg-config --libs wayland-client)
 
-# Keep libraries after objects and independent of distro-supplied LDFLAGS.
 LDLIBS ?= $(WAYLAND_LIBS) -lm
 
 HERE := $(dir $(lastword $(MAKEFILE_LIST)))
@@ -36,7 +33,6 @@ SRCS = dimmer.c \
        alpha-modifier-v1-protocol.c \
        xdg-shell-protocol.c
 
-# Rebuild when a vendored protocol header changes.
 HDRS = wlr-layer-shell-unstable-v1-client-protocol.h \
        viewporter-client-protocol.h \
        single-pixel-buffer-v1-client-protocol.h \

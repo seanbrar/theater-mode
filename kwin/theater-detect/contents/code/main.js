@@ -13,16 +13,13 @@ var IFACE = "com.seanbrar.TheaterMode";
 // Periodic full snapshot interval to keep state synchronized with daemon.
 var SNAPSHOT_INTERVAL_MS = 15000;
 
-// Tracked windows, keyed by internalId, storing last announced state.
 var tracked = {};
 
-// Windows whose output/fullscreen signal listeners have been connected.
 var watched = {};
 
 // Delay to coalesce rapid screensChanged signals during display mode changes.
 var SCREENS_SETTLE_MS = 1000;
 
-// Retain timer references at script scope to prevent garbage collection.
 var heartbeat = null;
 var screenSettle = null;
 
@@ -38,7 +35,6 @@ function outputNameOf(window) {
     }
 }
 
-// Ignore windows without a valid PID, and panels, docks, and other non-normal windows.
 function isCandidate(window) {
     return !!window && window.pid > 0 && window.normalWindow === true;
 }
@@ -70,7 +66,6 @@ function announceChanged(window) {
     var id = idOf(window);
     var previous = tracked[id];
     if (!previous) {
-        // Window was not previously tracked; announce as opened.
         announceOpened(window);
         return;
     }
@@ -95,7 +90,6 @@ function announceClosed(window) {
     callDBus(SERVICE, OBJPATH, IFACE, "WindowClosed", id);
 }
 
-// Track display output and fullscreen state changes for a window.
 function watch(window) {
     var id = idOf(window);
     if (watched[id]) {
@@ -137,7 +131,6 @@ function screenNames() {
     return names;
 }
 
-// Send full window snapshot to synchronize daemon state.
 function sendSnapshot() {
     // Names are joined into one string, as callDBus marshals scalar arguments only.
     var screens = screenNames();
@@ -154,7 +147,6 @@ function sendSnapshot() {
     callDBus(SERVICE, OBJPATH, IFACE, "SnapshotEnd");
 }
 
-// Trigger a snapshot when display configuration changes.
 function watchScreens() {
     if (!workspace.screensChanged) {
         return;

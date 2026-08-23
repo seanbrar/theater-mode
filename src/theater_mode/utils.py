@@ -39,11 +39,7 @@ def read_process_cmdline(pid: int) -> str:
 
 
 def read_process_environ(pid: int) -> dict[str, str]:
-    """Read a process's environment variables from /proc/<pid>/environ.
-
-    Note: Proton/Wine processes running inside containerized runners (such as pressure-vessel)
-    retain accessible /proc/<pid>/environ mappings in user sessions due to mount namespacing.
-    """
+    """Read a process's environment from /proc, or return an empty mapping on failure."""
     try:
         raw = Path(f"/proc/{pid}/environ").read_bytes()
     except (OSError, ValueError):

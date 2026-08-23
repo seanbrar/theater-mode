@@ -20,20 +20,16 @@ from pathlib import Path
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "artwork_reference"
 MANIFEST_FILE = FIXTURES_DIR / "manifest.json"
 
-# Perceptual acceptance thresholds
-MAX_ALLOWED_AVG_MAE = 0.50  # Average channel MAE across entire frame must be <= 0.50 / 255
-# Worst single-channel difference. Derived from measurement, not chosen: the broadband
-# fixtures peak at 14 and are deliberately harder than real Steam hero art, which peaks at
-# 13. The remaining margin absorbs float variation across toolchains without hiding drift.
+MAX_ALLOWED_AVG_MAE = 0.50
+# Peak single-channel difference threshold, derived from broadband fixtures to
+# absorb floating-point variation across toolchains.
 MAX_ALLOWED_PEAK_DELTA = 18
 
 
 def compare_argb_buffers(actual: bytes, expected: bytes) -> tuple[float, float, float, int]:
-    """Calculate per-channel Mean Absolute Error and peak delta.
+    """Return per-channel mean absolute errors and the peak RGB delta.
 
-    Comparing one channel plane at a time keeps every loop inside CPython's C layer: the
-    stride slice, the subtraction, the sum, and the max. An explicit per-pixel loop over
-    this corpus costs roughly twice as much for no gain in clarity.
+    Raise ValueError when the buffers have different lengths.
     """
     if len(actual) != len(expected):
         raise ValueError(

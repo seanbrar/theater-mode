@@ -198,7 +198,6 @@ class TestArtwork(unittest.TestCase):
                 self.assertEqual(target, expected_target)
                 self.assertEqual(mock_run.call_count, 1)
 
-                # Verify command invocation contract (including integer dim_millis)
                 cmd = mock_run.call_args.args[0]
                 self.assertEqual(cmd[0], str(fake_bin))
                 self.assertEqual(cmd[1], str(hero_file))
@@ -208,7 +207,6 @@ class TestArtwork(unittest.TestCase):
                 self.assertEqual(cmd[5], "400")
                 self.assertEqual(mock_run.call_args.kwargs.get("timeout"), 3.0)
 
-                # Calling build_artwork again should return cached path without re-running subprocess
                 cached_target = build_artwork("12345", 320, 240, 0.4)
                 self.assertEqual(cached_target, target)
                 self.assertEqual(mock_run.call_count, 1)
@@ -235,8 +233,7 @@ class TestArtwork(unittest.TestCase):
                 path.write_bytes(b"x" * 500)
                 os.utime(path, (1000 + age, 1000 + age))
 
-            # The oldest entry is the one in use, so eviction has to skip it and take the
-            # next oldest. Only this surviving set satisfies both rules at once.
+            # current_target is never evicted; trimming removes the next-oldest entry.
             prune_artwork_cache(
                 cache_dir, current_target=files[0], max_bytes=1200, trim_to_bytes=1100
             )

@@ -24,8 +24,6 @@ from theater_mode.config.schema import (
     make_default_provenance,
 )
 
-# Line parsers for provenance and the format-preserving writer. Table headers accept
-# quoted segments so EDID-style ids such as [outputs."LG Electronics:27GL850"] are seen.
 TABLE_HEADER_PATTERN = re.compile(r"^\s*\[([^\[\]]+)\]\s*(?:#.*)?$")
 KEY_ASSIGN_PATTERN = re.compile(r"^\s*([a-zA-Z0-9_\-]+)\s*=\s*(.*?)\s*(?:#.*)?$")
 _TABLE_SEGMENT = re.compile(r"\"([^\"]*)\"|'([^']*)'|([^.]+)")
@@ -133,8 +131,6 @@ class ConfigLoader:
         self.session_overrides = session_overrides or {}
         self.diagnostics: list[Diagnostic] = []
 
-    # -- Validation --------------------------------------------------------
-
     def _reject(
         self,
         spec: FieldSpec,
@@ -221,8 +217,6 @@ class ConfigLoader:
                 offending_value=value,
             )
         )
-
-    # -- Layer loading -----------------------------------------------------
 
     def _load_file_layer(
         self, file_path: Path, layer: Layer
@@ -361,7 +355,6 @@ class ConfigLoader:
                 continue
 
             table, leaf = split
-            # Provenance uses unquoted key paths to match file layers.
             key_path = f"{table}.{leaf}"
 
             value = self.validate_leaf(spec, raw_value, key_path)
@@ -373,8 +366,6 @@ class ConfigLoader:
             else:
                 tables[table][leaf] = value
             provenance[key_path] = Provenance(layer=Layer.SESSION)
-
-    # -- Resolution --------------------------------------------------------
 
     def resolve(self) -> ResolvedConfig:
         """Execute full three-layer resolution and return an immutable ResolvedConfig."""

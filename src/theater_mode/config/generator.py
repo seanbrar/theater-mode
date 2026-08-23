@@ -45,7 +45,6 @@ def generate_reference_config() -> str:
         for field_name, spec in table_fields.items():
             lines += _document(field_name, spec)
 
-    # The per-output example is derived from the schema so it cannot drift from it.
     overridable = [
         name
         for fields in SCHEMA_TABLES.values()

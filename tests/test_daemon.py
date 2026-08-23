@@ -96,7 +96,6 @@ class TestDaemon(unittest.TestCase):
         self.daemon.window_opened("win-2", "steam_app_200", "301", "DP-2", "true")
         self.assertEqual(len(self.daemon.windows), 2)
 
-        # Snapshot containing only win-1
         self.daemon.snapshot_begin("")
         self.daemon.window_opened("win-1", "steam_app_100", "300", "DP-1", "true")
         self.daemon.snapshot_end()
@@ -108,7 +107,6 @@ class TestDaemon(unittest.TestCase):
             self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
             self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2"], "1671210")
 
-        # DP-3 connected while game is running
         with patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2", "DP-3"}):
             self.daemon.reconcile()
 
@@ -131,7 +129,6 @@ class TestDaemon(unittest.TestCase):
             self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
         mock_probe.assert_called_once()
 
-        # Recycled window id with new pid triggers new inspection
         self.daemon.window_opened("win-game", "steam_app_1671210", "999", "DP-1", "true")
         self.assertEqual(mock_probe.call_count, 2)
 
@@ -147,26 +144,21 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(len(self.daemon.windows), 0)
 
     def test_config_dbus_methods(self) -> None:
-        # GetResolved
         resolved_json = self.daemon.get_resolved()
         self.assertIn("effect", resolved_json)
         self.assertIn("provenance", resolved_json)
 
-        # GetDiagnostics
         diags_json = self.daemon.get_diagnostics()
         self.assertEqual(diags_json, "[]")
 
-        # Preview
         prev_res = self.daemon.preview('{"effect.dim_factor": 0.33}')
         self.assertIn("preview applied", prev_res)
         self.assertEqual(self.daemon.config.effect.dim_factor, 0.33)
 
-        # RevertPreview
         revert_res = self.daemon.revert_preview()
         self.assertIn("preview reverted", revert_res)
         self.assertEqual(self.daemon.config.effect.dim_factor, 0.85)
 
-        # Reload falls back to built-in defaults (both layers are empty)
         reload_res = self.daemon.reload()
         self.assertIn("reloaded", reload_res)
         self.assertEqual(self.daemon.config.daemon.revert_delay, 3.0)
@@ -196,17 +188,14 @@ class TestDaemon(unittest.TestCase):
         self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2"], "100")
         self.assertEqual(daemon.active_output, "DP-1")
 
-        # Closing the game initiates revert delay timer instead of reverting immediately
         daemon.window_closed("win-game")
         self.mock_effect.revert.assert_not_called()
         self.assertEqual(scheduler.pending_count, 1)
 
-        # Before timeout expires (2.0s), effect remains active
         scheduler.advance_sec(2.0)
         self.mock_effect.revert.assert_not_called()
         self.assertEqual(daemon.active_output, "DP-1")
 
-        # Passing the 3.0s threshold triggers effect reversion
         scheduler.advance_sec(1.1)
         self.mock_effect.revert.assert_called_once()
         self.assertIsNone(daemon.active_output)
@@ -225,14 +214,11 @@ class TestDaemon(unittest.TestCase):
         daemon.window_closed("win-1")
         self.assertEqual(scheduler.pending_count, 1)
 
-        # 1.5s into the 3.0s revert delay, a new game window opens
         scheduler.advance_sec(1.5)
         daemon.window_opened("win-2", "steam_app_200", "201", "DP-1", "true")
 
-        # Pending revert should be cancelled
         self.assertEqual(scheduler.pending_count, 0)
 
-        # Advance past the original 3.0s timeout: revert is never called
         scheduler.advance_sec(5.0)
         self.mock_effect.revert.assert_not_called()
         self.assertEqual(daemon.active_output, "DP-1")
@@ -246,21 +232,17 @@ class TestDaemon(unittest.TestCase):
             scheduler=scheduler,
         )
 
-        # Start game on DP-1
         daemon.window_opened("win-1", "steam_app_100", "200", "DP-1", "true")
         self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2"], "100")
         self.assertEqual(daemon.active_output, "DP-1")
 
-        # Game migrates to DP-2
         daemon.window_changed("win-1", "DP-2", "true")
         self.assertEqual(scheduler.pending_count, 1)
 
-        # While stage timer is pending (1.0s), active output stays on DP-1
         scheduler.advance_sec(1.0)
         self.assertEqual(daemon.active_output, "DP-1")
         self.assertEqual(self.mock_effect.apply.call_count, 1)
 
-        # After stage timer completes (1.5s total), migration commits to DP-2
         scheduler.advance_sec(0.6)
         self.mock_effect.revert.assert_called_once()
         self.assertEqual(self.mock_effect.apply.call_count, 2)
@@ -280,12 +262,10 @@ class TestDaemon(unittest.TestCase):
         daemon.window_changed("win-1", "DP-2", "true")
         self.assertEqual(scheduler.pending_count, 1)
 
-        # Window quickly flickers back to DP-1 before 1.5s timeout
         scheduler.advance_sec(0.5)
         daemon.window_changed("win-1", "DP-1", "true")
         self.assertEqual(scheduler.pending_count, 0)
 
-        # Advance past 1.5s: effect never migrated away from DP-1
         scheduler.advance_sec(3.0)
         self.mock_effect.revert.assert_not_called()
         self.assertEqual(self.mock_effect.apply.call_count, 1)
@@ -304,10 +284,8 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(self.daemon.active_output, "DP-1")
         self.assertEqual(self.mock_effect.apply.call_count, 1)
 
-        # Helper dies unexpectedly while game is still open on DP-1
         type(self.mock_effect).is_running = PropertyMock(return_value=False)
         self.daemon.reconcile()
-        # Should detect dead helper and re-apply
         self.assertEqual(self.mock_effect.apply.call_count, 2)
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1"})
@@ -335,7 +313,6 @@ class TestDaemon(unittest.TestCase):
         self.mock_effect.apply.assert_called_once_with("DP-1", ["DP-2"], "100")
 
     def test_status_counts_detector_silence_from_startup(self) -> None:
-        # Silence is measured from daemon start to avoid false alarms on restart.
         def silence() -> float:
             return json.loads(self.daemon.status())["detector_silence_seconds"]
 

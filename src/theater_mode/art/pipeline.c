@@ -1,16 +1,7 @@
 /*
  * pipeline.c — Image processing pipeline for theater-art.
  *
- * High-performance reentrant image transformation pipeline matching
- * theater-mode ambient backdrop composition.
- *
- * Architecture & Optimizations:
- * - Direct subregion resampling eliminates intermediate crop allocations
- * - Unified single-allocation contiguous filter tables eliminate heap fragmentation
- * - Sliding ring buffer keeps intermediate rows strictly inside CPU L2 cache
- * - Vectorized vertical multiply-accumulate and fast saturation conversion
- * - Chunk-buffered atomic ARGB file output eliminates thousands of write syscalls
- * - Fast-path bilinear upscaling and fixed-point branchless feather compositing
+ * Ambient backdrop composition and downscaling pipeline for game artwork.
  */
 
 #define _DEFAULT_SOURCE
@@ -80,15 +71,9 @@ void image_buffer_free(struct image_buffer *buf) {
     free(buf);
 }
 
-/*
- * Fast structure validators for image inputs.
- *
- * Steam library cache downloads can be interrupted midway, leaving truncated
- * files on disk. These validators inspect container framing to reject damaged
- * streams before invoking stb_image.
- */
+/* Inspect container framing to reject damaged streams from interrupted
+ * downloads before decoding with stb_image. */
 
-/* Verify that a memory buffer contains a structurally complete JPEG stream. */
 static bool is_valid_complete_jpeg(const uint8_t *data, size_t size) {
     if (!data || size < 4) return false;
     if (data[0] != 0xFF || data[1] != 0xD8) return false; /* SOI */
@@ -115,7 +100,7 @@ static bool is_valid_complete_jpeg(const uint8_t *data, size_t size) {
 
         if (marker != 0xDA) continue; /* not Start Of Scan */
 
-        /* Scan through entropy-coded data, skipping byte-stuffed 0xFF00 and restart markers */
+        /* Byte-stuffed 0xFF00 and restart markers belong to the scan data. */
         seen_scan = true;
         while (pos + 1 < size) {
             if (data[pos] != 0xFF) { pos++; continue; }
@@ -130,7 +115,6 @@ static bool is_valid_complete_jpeg(const uint8_t *data, size_t size) {
     return false;
 }
 
-/* Verify that a memory buffer contains a structurally complete PNG stream. */
 static bool is_valid_complete_png(const uint8_t *data, size_t size) {
     static const uint8_t signature[8] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
     if (!data || size < sizeof signature + 12) return false;
@@ -181,7 +165,6 @@ static bool image_dimensions_within_limit(
     return true;
 }
 
-/* Load and decode a validated JPEG or PNG into an RGB24 buffer. */
 struct image_buffer *image_load(const char *path, size_t max_bytes) {
     if (!path || max_bytes == 0) return NULL;
 
@@ -242,8 +225,6 @@ struct image_buffer *image_load(const char *path, size_t max_bytes) {
     return buf;
 }
 
-/* --- Resampling Core (Separable 2-Pass Filter with Sliding Ring Buffer) --- */
-
 struct filter_weight_entry {
     int min_idx;
     int count;
@@ -279,13 +260,8 @@ static double filter_lanczos3(double x) {
     return (sin(pix) / pix) * (sin(pix / 3.0) / (pix / 3.0));
 }
 
-/*
- * Build precomputed 1D filter kernel table.
- *
- * For downscaling (scale < 1.0), the filter footprint expands by 1/scale
- * (support scaling) for proper anti-aliasing. All kernel weights are normalized
- * to sum to 1.0 and stored in a single contiguous pool.
- */
+/* Downscaling expands the filter support by the inverse scale. Each destination
+ * sample's weights are normalized so a constant source retains its brightness. */
 static struct filter_table *build_filter_table(
     int src_size,
     int dst_size,
@@ -356,17 +332,8 @@ static struct filter_table *build_filter_table(
     return tbl;
 }
 
-/*
- * Separable 2-pass resampler with sliding cache ring buffer.
- *
- * Supports optional subregion offset (src_x, src_y) to resample crops directly
- * from the source image without allocating or copying intermediate buffers.
- *
- * To minimize memory footprint and maximize CPU L2 cache locality, Pass 1
- * (horizontal) caches intermediate rows in a power-of-two ring buffer sized to
- * the vertical filter support. Pass 2 (vertical accumulation) streams directly
- * from this ring buffer into the destination row.
- */
+/* The power-of-two ring holds every horizontal row needed by one vertical
+ * kernel. Tags distinguish source rows whose slots collide after wraparound. */
 static struct image_buffer *resample_separable_subregion(
     const struct image_buffer *src,
     int src_x, int src_y, int region_w, int region_h,
@@ -382,7 +349,6 @@ static struct image_buffer *resample_separable_subregion(
     }
     if ((uint64_t)dst_w * (uint64_t)dst_h > MAX_TOTAL_PIXELS) return NULL;
 
-    /* Fast path: exact 2D identity copy */
     if (src_x == 0 && src_y == 0 && region_w == src->width && region_h == src->height && dst_w == region_w && dst_h == region_h) {
         struct image_buffer *dst = image_buffer_create(dst_w, dst_h, 3);
         if (!dst) return NULL;
@@ -405,7 +371,6 @@ static struct image_buffer *resample_separable_subregion(
         return NULL;
     }
 
-    /* Cache-resident sliding ring buffer for intermediate horizontal rows */
     int ring_size = v_tbl->max_count + 4;
     int ring_capacity = 1;
     while (ring_capacity < ring_size) ring_capacity <<= 1;
@@ -434,7 +399,6 @@ static struct image_buffer *resample_separable_subregion(
         int v_cnt = v_ent->count;
         const float *v_w = v_tbl->weights_pool + v_ent->weight_offset;
 
-        /* Pass 1: Ensure all required intermediate rows for row y are cached in ring_buf */
         for (int k = 0; k < v_cnt; k++) {
             int sy = v_min + k;
             if (sy < 0) sy = 0;
@@ -481,7 +445,6 @@ static struct image_buffer *resample_separable_subregion(
             }
         }
 
-        /* Pass 2: Vertical accumulation from ring buffer into destination row */
         uint8_t * __restrict dst_row = dst->data + (size_t)y * (size_t)dst->stride;
         float * __restrict accum = row_accum;
 
@@ -544,12 +507,7 @@ struct image_buffer *image_resample_lanczos(const struct image_buffer *src, int 
     return resample_separable(src, dst_w, dst_h, filter_lanczos3, 3.0);
 }
 
-/* --- Box Blur (Kutskir 3-Pass Gaussian Approximation) --- */
-
-/*
- * 1D box blur using a running sliding window accumulator with edge clamping.
- * Runs in O(W * H) time per pass, independent of blur radius.
- */
+/* A running accumulator makes each edge-clamped box pass independent of radius. */
 static void box_blur_1d(
     const uint8_t *src,
     uint8_t *dst,
@@ -633,10 +591,7 @@ static void box_blur_1d(
     }
 }
 
-/*
- * Approximate Gaussian blur via 3 passes of extended box blur (Kutskir algorithm).
- * Computes optimal discrete box radii to match target Gaussian standard deviation.
- */
+/* Three extended-box passes approximate the requested Gaussian radius. */
 void image_gaussian_blur(struct image_buffer *img, float radius) {
     if (!img || img->channels != 3 || radius <= 0.0f) return;
 
@@ -667,7 +622,6 @@ void image_gaussian_blur(struct image_buffer *img, float radius) {
     free(tmp);
 }
 
-/* Adjust brightness using a 256-entry lookup table. */
 void image_enhance_brightness(struct image_buffer *img, float factor) {
     if (!img || img->channels != 3) return;
     uint8_t lut[256];
@@ -683,10 +637,6 @@ void image_enhance_brightness(struct image_buffer *img, float factor) {
     }
 }
 
-/*
- * Generate a 1D feather mask with linear ramps at both edges and opaque center.
- * Used for soft edge blending on the exposed axis when aspect ratios differ.
- */
 struct mask_buffer *image_create_feather_mask(int length, int feather, bool horizontal) {
     if (length <= 0 || feather <= 0) return NULL;
     struct mask_buffer *mask = malloc(sizeof(struct mask_buffer));
@@ -730,10 +680,8 @@ void mask_buffer_free(struct mask_buffer *mask) {
 /*
  * Composite foreground over backdrop with optional 1D edge feather mask.
  *
- * The blend uses (t * 257 + 128) >> 16 as a fast integer approximation of
- * Pillow's paste-with-mask. Monotonic, bounds-preserving, exact at endpoints:
- * alpha 0 yields backdrop, alpha 255 yields foreground. Locked against checksum
- * in tests/art/test_pipeline.c.
+ * Blend arithmetic (t * 257 + 128) >> 16 approximates Pillow paste-with-mask
+ * and is locked against a checksum in tests/art/test_pipeline.c.
  */
 void image_composite_over(
     struct image_buffer *backdrop,
@@ -786,7 +734,6 @@ void image_composite_over(
             continue;
         }
 
-        /* Horizontal feather mask */
         for (int fx = fx0; fx < fx0 + render_w; fx++) {
             uint32_t alpha = (fx < mask->length) ? mask->data[fx] : 255;
             if (alpha == 0) continue;
@@ -826,10 +773,6 @@ static bool write_all(int fd, const void *buf, size_t count) {
     return true;
 }
 
-/*
- * Atomically write raw ARGB8888 (BGRA byte order) via chunk-buffered writes
- * to a temporary file, followed by rename.
- */
 int image_write_argb(const struct image_buffer *img, const char *target_path) {
     if (!img || !target_path || img->channels != 3) return -1;
 
@@ -910,16 +853,6 @@ int image_write_argb(const struct image_buffer *img, const char *target_path) {
     return 0;
 }
 
-/*
- * Full ambient backdrop rendering pipeline:
- * 1. Decode hero art (JPEG or PNG)
- * 2. Directly downscale cropped backdrop subregion to 1/8 scale
- * 3. Apply 3-pass Gaussian blur and backdrop dimming (0.45 * brightness)
- * 4. Upscale blurred backdrop to target dimensions via bilinear interpolation
- * 5. Downscale source to contained foreground dimensions via Lanczos-3 (0.75 * brightness)
- * 6. Composite foreground over backdrop with directional edge feathering
- * 7. Write raw ARGB8888 output file atomically
- */
 int render_artwork_pipeline(
     const char *input_path,
     const char *output_path,
@@ -967,7 +900,6 @@ int render_artwork_pipeline(
     int low_h = target_height / downscale;
     if (low_h < 1) low_h = 1;
 
-    /* Directly resample cropped source subregion without allocating intermediate crop buffer */
     struct image_buffer *backdrop_low = resample_separable_subregion(
         source, crop_x, crop_y, crop_w, crop_h, low_w, low_h, filter_triangle, 1.0
     );

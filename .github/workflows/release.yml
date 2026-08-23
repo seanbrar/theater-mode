@@ -11,8 +11,7 @@ permissions:
 jobs:
   validate:
     name: validate release source
-    # Pinned, not ubuntu-latest: this job gates publishing, so a GitHub runner-image
-    # rollover must not be able to block a tag push.
+    # The publishing gate changes runner series only through an explicit edit here.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

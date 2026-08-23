@@ -26,7 +26,6 @@ def _call_dbus_method(method_name: str, *args: Any) -> str:
         conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         params = None
         if args:
-            # Format arguments as tuple of strings
             params = GLib.Variant(f"({'s' * len(args)})", tuple(str(a) for a in args))
 
         result = conn.call_sync(
@@ -217,74 +216,58 @@ def main(
     parser.add_argument("--version", action="version", version=f"theater-mode {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # status
     subparsers.add_parser("status", help="Show current daemon state and tracked windows")
 
-    # config
     config_parser = subparsers.add_parser("config", help="Manage daemon configuration")
     config_sub = config_parser.add_subparsers(dest="config_cmd", required=True)
 
-    # config show
     show_p = config_sub.add_parser("show", help="Display resolved configuration with provenance")
     show_p.add_argument("--json", action="store_true", help="Output raw JSON instead of table")
 
-    # config diagnostics
     diag_p = config_sub.add_parser("diagnostics", help="Display configuration warnings and errors")
     diag_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    # config get
     get_p = config_sub.add_parser("get", help="Get a single resolved configuration value")
     get_p.add_argument("key", help="Key path (e.g. effect.dim_factor or outputs.DP-1.dim_factor)")
 
-    # config set (Commit)
     set_p = config_sub.add_parser("set", help="Permanently commit setting to user config file")
     set_p.add_argument("key", help="Key path (e.g. effect.dim_factor)")
     set_p.add_argument("value", help="New value")
 
-    # config unset
     unset_p = config_sub.add_parser(
         "unset", help="Remove a setting from the user config file, restoring its default"
     )
     unset_p.add_argument("keys", nargs="+", metavar="KEY", help="Key path(s) to remove")
 
-    # config preview
     prev_p = config_sub.add_parser("preview", help="Preview setting in-session without saving")
     prev_p.add_argument("key", help="Key path (e.g. effect.dim_factor)")
     prev_p.add_argument("value", help="Preview value")
 
-    # config revert-preview
     config_sub.add_parser(
         "revert-preview", help="Discard session preview and revert to config file"
     )
 
-    # config reload
     config_sub.add_parser("reload", help="Reload configuration files from disk")
 
-    # doctor
     doc_p = subparsers.add_parser("doctor", help="Check this installation for problems")
     doc_p.add_argument("--json", action="store_true", help="Output findings as JSON")
 
-    # simulate
     sim_p = subparsers.add_parser("simulate", help="Simulate a game launch")
     sim_p.add_argument("appid", help="Steam AppID")
     sim_p.add_argument("output", help="Target display connector (e.g. DP-1)")
 
-    # outputs
     out_p = subparsers.add_parser(
         "outputs", help="List connected displays and the config keys that address them"
     )
     out_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    # clear
     subparsers.add_parser("clear", help="Clear all active simulations and restore displays")
 
-    # uninstall
     uninstall_p = subparsers.add_parser("uninstall", help="Remove theater-mode from this machine")
     uninstall_p.add_argument(
         "-y", "--yes", action="store_true", help="Do not prompt for confirmation"
     )
 
-    # update
     update_p = subparsers.add_parser("update", help="Update theater-mode to the latest release")
     update_p.add_argument(
         "--check",
@@ -348,7 +331,6 @@ def main(
             method = "Commit" if sub == "set" else "Preview"
             result = call_dbus(method, json.dumps({args.key: _parse_cli_value(args.value)}))
             print(result)
-            # The daemon reports refused keys inline rather than failing the D-Bus call.
             if result.startswith("error") or "rejected:" in result:
                 return 1
 
@@ -357,7 +339,6 @@ def main(
             print(result)
             if result.startswith("error") or "rejected:" in result:
                 return 1
-            # Show the resolved fallback value for each removed key.
             resolved = json.loads(call_dbus("GetResolved"))
             for key in args.keys:
                 value = _lookup(resolved, key)

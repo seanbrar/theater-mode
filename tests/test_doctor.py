@@ -184,7 +184,6 @@ class TestDoctorFindings(DoctorTestCase):
 
         checks = self.run_checks(call_dbus=dead)
         self.assertEqual(self.status_of(checks, "D-Bus connection"), doctor.FAIL)
-        # The remaining sections must still have been collected.
         self.assertIn("Artwork", {c.section for c in checks})
         self.assertEqual(doctor.exit_code(checks), 1)
 
@@ -385,7 +384,6 @@ class TestDoctorCliRouting(DoctorTestCase):
 
             return call_dbus
 
-        # Daemon awaiting its first snapshot is quiet, not broken.
         checks = self.run_checks(call_dbus=silent_for(0.0))
         self.assertEqual(self.status_of(checks, "KWin detector contact"), doctor.OK)
 

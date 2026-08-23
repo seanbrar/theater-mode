@@ -1,7 +1,6 @@
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# Pin ruff minor version to ensure consistent formatting across environments.
 required-version = ">=0.16,<0.17"
 
 [tool.ruff.lint]

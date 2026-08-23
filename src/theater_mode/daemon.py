@@ -101,14 +101,13 @@ class Daemon:
         self.active_output: str | None = None
         self._applied_others: list[str] | None = None
         self._compositor_outputs: set[str] = set()
-        # Track time since last detector snapshot (seeded at start for silence calculations).
+        # Silence starts at daemon startup, before the detector's first snapshot.
         self._detector_contact: float = time.monotonic()
         self._snapshot: set[str] | None = None
         self._pending_revert: Any | None = None
         self._pending_stage: Any | None = None
         self._session_overrides: dict[str, Any] = {}
 
-        # Sync effect options on startup
         self.effect.update_options(EffectOptions.from_config(self.config))
 
     @property
@@ -122,8 +121,6 @@ class Daemon:
     @property
     def stage_delay(self) -> float:
         return self.config.daemon.stage_delay
-
-    # -- State Machine & Lifecycle -----------------------------------------
 
     def game_windows(self) -> list[TrackedWindow]:
         """Return all active windows identified as games, filtering by fullscreen if configured."""
@@ -149,7 +146,6 @@ class Daemon:
                     self._revert_now()
             return
 
-        # Game window detected: cancel any pending revert from launcher transitions
         self._cancel_pending_revert()
 
         stage = self._stage(games)
@@ -165,11 +161,10 @@ class Daemon:
             return
 
         if self.active_output is None:
-            # Initial activation: apply immediately without staging delay
+            # stage_delay applies only when an active game moves to another output.
             self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
             return
 
-        # Output migration: require the game to persist on the new screen before retargeting
         if self._pending_stage is not None:
             return
         log.info(
@@ -266,8 +261,6 @@ class Daemon:
         outputs = {w.output for w in self.windows.values() if w.output}
         outputs.update(self._compositor_outputs or connected_outputs())
         return outputs
-
-    # -- D-Bus Interface Handlers ------------------------------------------
 
     def window_opened(
         self,
@@ -410,8 +403,6 @@ class Daemon:
         self.effect.cancel_pending()
         self._revert_now(immediate=immediate)
         return "cleared"
-
-    # -- Configuration API Handlers ----------------------------------------
 
     def get_outputs(self) -> str:
         """Return JSON array of connected outputs and their configuration match keys."""
@@ -563,10 +554,8 @@ class Daemon:
         self.config = new_config
         self.diagnostics = new_diagnostics
 
-        # Update running effect with new options
         self.effect.update_options(EffectOptions.from_config(self.config))
 
-        # Re-apply effect if a game is currently active
         if self.active_output is not None and self._applied_others is not None:
             stage = self._stage(self.game_windows())
             if stage is not None:

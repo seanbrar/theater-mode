@@ -58,7 +58,6 @@ def main(argv: list[str] | None = None) -> int:
     """Run the theater-moded application."""
     args = parse_args(argv)
 
-    # Read base dev config from environment and merge any explicit dev CLI flags
     env_dev = get_dev_config()
     dev_config = DevConfig(
         user_config_override=args.user_config_override or env_dev.user_config_override,
@@ -73,7 +72,6 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
 
-    # Resolve 3-layer configuration at composition root
     resolved_config, diagnostics = load_resolved_config(dev_config=dev_config)
     for d in diagnostics:
         log.warning(

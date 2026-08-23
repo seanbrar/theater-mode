@@ -1,12 +1,8 @@
 /*
  * test_pipeline.c — unit tests for the theater-art image pipeline.
  *
- * Includes pipeline.c directly so the file-static helpers (structure validators, filter
- * table construction) are reachable without widening their visibility in production.
- *
- * The oracle in tests/verify_oracle.py checks end-to-end output against Pillow. It cannot
- * localise a failure or reach the code paths that never touch a rendered frame, which is
- * what these cover: the validators, the blend identity, and the filter tables.
+ * Includes pipeline.c directly so its file-static validators and filter-table builder
+ * remain private in production.
  *
  *   test_pipeline [path/to/tests/fixtures/artwork_reference]
  */
@@ -64,13 +60,9 @@ static uint8_t *read_fixture(const char *name, size_t *out_size) {
 }
 
 /*
- * The blend in image_composite_over is an approximation of Pillow's paste-with-mask, not
- * an exact reproduction of it and not t / 255. Pillow is not available here, so rather
- * than assert against a model of it, this locks the arithmetic against a checksum
- * measured over every possible input, plus the properties that must hold regardless.
- *
- * Regenerate the constant only when a deviation from Pillow has been re-measured:
- *   see the note in image_composite_over for the measured bounds (0.099%, max 1).
+ * Blend arithmetic in image_composite_over is locked against a checksum measured
+ * over every possible input. Regenerate the constant only when a deviation from
+ * Pillow has been remeasured.
  */
 #define BLEND_FNV1A64 0xCBEB1EA87406CFB5ULL
 
@@ -100,7 +92,6 @@ static void test_blend_arithmetic_is_locked(void) {
     CHECK(range_violations == 0);
     CHECK(endpoint_violations == 0);
 
-    /* Raising alpha must never move the result away from the foreground. */
     for (int bg = 0; bg <= 255; bg += 7) {
         for (int fg = bg + 1; fg <= 255; fg += 11) {
             for (int alpha = 1; alpha <= 255; alpha++) {
@@ -128,16 +119,13 @@ static void test_damaged_jpeg_rejected(void) {
     uint8_t *b = read_fixture("hero_16x9_to_16x9_input.jpg", &n);
     if (!b) return;
 
-    /* Truncation at several points, which is how an interrupted download presents. */
     CHECK(!is_valid_complete_image(b, n / 2));
     CHECK(!is_valid_complete_image(b, n / 4));
     CHECK(!is_valid_complete_image(b, 64));
     CHECK(!is_valid_complete_image(b, 2));
 
-    /* Trailing EOI removed. */
     CHECK(!is_valid_complete_image(b, n - 2));
 
-    /* A marker that cannot appear inside entropy-coded data. */
     uint8_t *nested = malloc(n);
     memcpy(nested, b, n);
     nested[n / 2] = 0xFF;
@@ -145,7 +133,6 @@ static void test_damaged_jpeg_rejected(void) {
     CHECK(!is_valid_complete_image(nested, n));
     free(nested);
 
-    /* A segment length that runs past the end of the buffer. */
     uint8_t *badlen = malloc(n);
     memcpy(badlen, b, n);
     badlen[4] = 0xFF;
@@ -153,7 +140,6 @@ static void test_damaged_jpeg_rejected(void) {
     CHECK(!is_valid_complete_image(badlen, n));
     free(badlen);
 
-    /* Wrong magic entirely. */
     uint8_t garbage[64];
     memset(garbage, 0x41, sizeof garbage);
     CHECK(!is_valid_complete_image(garbage, sizeof garbage));
@@ -175,21 +161,18 @@ static void test_valid_png_accepted_and_damage_rejected(void) {
     CHECK(!is_valid_complete_image(b, n - 12)); /* IEND removed */
     CHECK(!is_valid_complete_image(b, 8));      /* signature only */
 
-    /* Corrupt the signature. */
     uint8_t *sig = malloc(n);
     memcpy(sig, b, n);
     sig[3] = 'X';
     CHECK(!is_valid_complete_image(sig, n));
     free(sig);
 
-    /* First chunk must be IHDR. */
     uint8_t *ihdr = malloc(n);
     memcpy(ihdr, b, n);
     ihdr[12] = 'X';
     CHECK(!is_valid_complete_png(ihdr, n));
     free(ihdr);
 
-    /* A chunk length that overruns the buffer. */
     uint8_t *len = malloc(n);
     memcpy(len, b, n);
     len[8] = 0x7F;
@@ -200,10 +183,8 @@ static void test_valid_png_accepted_and_damage_rejected(void) {
 }
 
 static void test_oversized_image_rejected_before_decode(void) {
-    /* Minimal structurally complete PNG whose IHDR declares 268 megapixels. The empty
-     * IDAT is intentionally undecodable: dimension preflight must reject the header
-     * before stb_image attempts to allocate its decoded pixel buffer. CRCs are ignored
-     * by stb_image and are zero here because this test reaches header inspection only. */
+    /* The empty IDAT is undecodable. Dimension preflight must reject the 268-megapixel
+     * IHDR before stb_image reaches it; stb_image ignores the zero CRCs. */
     const uint8_t png[] = {
         0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A,
         0x00, 0x00, 0x00, 0x0D, 'I', 'H', 'D', 'R',
@@ -297,7 +278,6 @@ static void test_buffer_creation_rejects_bad_geometry(void) {
     image_buffer_free(NULL);
 }
 
-/* The identity fast path must be a copy, not an approximation. */
 static void test_identity_resample_is_exact(void) {
     struct image_buffer *src = image_buffer_create(37, 19, 3);
     CHECK(src != NULL);
@@ -320,8 +300,7 @@ static void test_identity_resample_is_exact(void) {
     image_buffer_free(src);
 }
 
-/* Overhanging and negatively positioned foregrounds must clip, never walk out of the
- * destination buffer. Exercised here because render_artwork_pipeline never produces them. */
+/* Overhanging and negative placements must clip to the destination buffer. */
 static void test_composite_clips_out_of_bounds_placements(void) {
     const int positions[][2] = {{-8, -3}, {-40, 0}, {30, 30}, {-5, 28}, {0, 0}};
     for (size_t i = 0; i < sizeof positions / sizeof positions[0]; i++) {
@@ -349,20 +328,16 @@ static void test_subregion_resample_rejects_bad_bounds(void) {
     CHECK(src != NULL);
     if (!src) return;
 
-    /* Negative subregion offsets */
     CHECK(resample_separable_subregion(src, -1, 0, 32, 32, 32, 32, filter_triangle, 1.0) == NULL);
     CHECK(resample_separable_subregion(src, 0, -1, 32, 32, 32, 32, filter_triangle, 1.0) == NULL);
 
-    /* Zero or negative region dimensions */
     CHECK(resample_separable_subregion(src, 0, 0, 0, 32, 32, 32, filter_triangle, 1.0) == NULL);
     CHECK(resample_separable_subregion(src, 0, 0, 32, -5, 32, 32, filter_triangle, 1.0) == NULL);
 
-    /* Subregion exceeding source bounds */
     CHECK(resample_separable_subregion(src, 33, 0, 32, 32, 32, 32, filter_triangle, 1.0) == NULL);
     CHECK(resample_separable_subregion(src, 0, 33, 32, 32, 32, 32, filter_triangle, 1.0) == NULL);
     CHECK(resample_separable_subregion(src, 10, 10, 60, 60, 32, 32, filter_triangle, 1.0) == NULL);
 
-    /* Valid exact boundary subregions */
     struct image_buffer *valid = resample_separable_subregion(src, 32, 32, 32, 32, 16, 16, filter_triangle, 1.0);
     CHECK(valid != NULL);
     image_buffer_free(valid);

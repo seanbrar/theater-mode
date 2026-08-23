@@ -122,7 +122,6 @@ class TestPerOutputSettings(DimEffectTestCase):
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
 
         commands = written(self.process)
-        # A single batched DIM selects both outputs, then only DP-3 is retuned.
         self.assertIn("DIM DP-2,DP-3 0.850 2.00 sine", commands)
         self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)
         self.assertNotIn("DIM DP-3 0.400 2.00 sine", commands)
@@ -211,8 +210,8 @@ class TestPerOutputSettings(DimEffectTestCase):
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
 
         commands = written(self.process)
-        self.assertIn("DIM_OUTPUT DP-2 0.700 2.00 sine", commands)  # connector rule
-        self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)  # identity rule
+        self.assertIn("DIM_OUTPUT DP-2 0.700 2.00 sine", commands)
+        self.assertIn("DIM_OUTPUT DP-3 0.400 2.00 sine", commands)
 
     def test_per_output_dim_factor_reaches_the_artwork(self) -> None:
         effect = DimEffect(

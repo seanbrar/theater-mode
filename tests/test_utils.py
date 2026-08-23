@@ -63,13 +63,11 @@ class TestUtils(unittest.TestCase):
             fake_bin = Path(tmp_dir) / "helper-test"
             fake_bin.touch(mode=0o755)
 
-            # 1. Environment variable override
             with patch.dict("os.environ", {"TEST_HELPER_BIN": str(fake_bin)}):
                 self.assertEqual(
                     find_helper_binary("helper-test", "TEST_HELPER_BIN", "sub"), fake_bin
                 )
 
-            # 2. Libexec directory
             with (
                 patch.dict("os.environ", {}, clear=True),
                 patch("theater_mode.utils.LIBEXEC_DIR", Path(tmp_dir)),
@@ -78,7 +76,6 @@ class TestUtils(unittest.TestCase):
                     find_helper_binary("helper-test", "TEST_HELPER_BIN", "sub"), fake_bin
                 )
 
-            # 3. PATH resolution fallback
             with (
                 patch.dict("os.environ", {}, clear=True),
                 patch("pathlib.Path.is_file", return_value=False),
@@ -88,7 +85,6 @@ class TestUtils(unittest.TestCase):
                     find_helper_binary("helper-test", "TEST_HELPER_BIN", "sub"), fake_bin
                 )
 
-            # 4. Not found
             with (
                 patch.dict("os.environ", {}, clear=True),
                 patch("pathlib.Path.is_file", return_value=False),

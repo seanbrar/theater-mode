@@ -24,8 +24,6 @@ _DESCRIPTOR_COUNT = 4
 _TAG_SERIAL = 0xFF
 _TAG_NAME = 0xFC
 
-# Maps the 3-letter EDID vendor code to a full vendor name (the "GSM" -> "LG Electronics"
-# table that KWin and kscreen also use). Optional; absent on minimal installs.
 PNP_IDS_PATH = Path("/usr/share/hwdata/pnp.ids")
 
 
@@ -115,7 +113,6 @@ def parse_edid(connector: str, blob: bytes) -> OutputIdentity:
     pnp_id = _decode_pnp_id(block[8:10])
     product_code, serial_number = struct.unpack("<HI", block[10:16])
 
-    # Prefer the descriptor strings a vendor writes for humans over the numeric fields.
     model = _descriptor_text(block, _TAG_NAME) or f"{product_code:04X}"
     serial = _descriptor_text(block, _TAG_SERIAL) or (
         f"0x{serial_number:04x}" if serial_number else None

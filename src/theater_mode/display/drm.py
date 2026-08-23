@@ -24,7 +24,6 @@ def _connectors() -> Iterator[tuple[str, Path, tuple[int, int] | None]]:
         except OSError:
             first_mode = ""
 
-        # Convert sysfs directory name (e.g., card1-DP-1 or card0-HDMI-A-1) to connector name (DP-1)
         name = path.name.partition("-")[2] or path.name
 
         width, _, height = first_mode.partition("x")

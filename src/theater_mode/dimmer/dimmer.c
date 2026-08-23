@@ -20,7 +20,7 @@
  *   QUIT
  */
 
-/* _DEFAULT_SOURCE, not _GNU_SOURCE: prevents the C23 strtol symbol promotion that raises the
+/* _DEFAULT_SOURCE prevents the C23 strtol symbol promotion that raises the
  * glibc floor. Paired with -std=gnu17 in the Makefile; both are required. */
 #define _DEFAULT_SOURCE
 #include <errno.h>
@@ -52,20 +52,16 @@
 #define MAX_OUTPUTS 32
 #define BUFFER_SIZE 4096
 
-/* Maximum artwork dimension limit in pixels. */
 #define MAX_ART_EDGE 16384
 
 #define COMPOSITOR_VERSION 4
-/* Highest version we know how to drive, and the lowest we can work with.
- * Binding above what a compositor advertises is a protocol error that kills the
- * connection, so both globals are clamped and the floors are reported by name. */
 #define LAYER_SHELL_VERSION 4
 #define LAYER_SHELL_VERSION_MIN 1
 #define LAYER_SHELL_SET_LAYER_VERSION 2
 #define OUTPUT_VERSION 4
 #define OUTPUT_VERSION_MIN 4
 
-/* Timeout to step animation if compositor stops delivering frame callbacks */
+/* After 100 ms without a frame callback, poll so blanked outputs still finish fades. */
 #define FRAME_STALL_SEC 0.1
 
 enum easing_curve {
@@ -77,7 +73,6 @@ enum easing_curve {
 
 struct dimmer_app;
 
-/* State slot per output; reused on hotplug. */
 struct output_state {
     struct dimmer_app *app;
     bool in_use;
@@ -88,10 +83,8 @@ struct output_state {
     /* Staged artwork, or NULL for flat black. */
     struct wl_buffer *art;
 
-    /* Stacking layer (default ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) */
     enum zwlr_layer_shell_v1_layer layer;
 
-    /* Overlay surface state */
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
     struct wp_viewport *viewport;
@@ -101,7 +94,6 @@ struct output_state {
     bool configured;
     double last_commit_sec;
 
-    /* Animation */
     double start_alpha;
     double target_alpha;
     double current_alpha;
@@ -177,9 +169,6 @@ static const char *easing_to_string(enum easing_curve curve) {
     }
 }
 
-/* Only the two layers the project exposes. TOP is indistinguishable from OVERLAY
- * for a fullscreen click-through surface, and BACKGROUND sits below Plasma's own
- * desktop containment, where nothing would be visible. */
 static bool parse_layer(const char *str, enum zwlr_layer_shell_v1_layer *out) {
     if (!str) return false;
     if (strcasecmp(str, "overlay") == 0) {
@@ -197,14 +186,12 @@ static const char *layer_to_string(enum zwlr_layer_shell_v1_layer layer) {
     return layer == ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM ? "bottom" : "overlay";
 }
 
-/* Convert 0.0-1.0 alpha to wp_alpha_modifier uint32 multiplier. */
 static uint32_t alpha_to_multiplier(double alpha) {
     if (alpha <= 0.0) return 0;
     if (alpha >= 1.0) return UINT32_MAX;
     return (uint32_t)(alpha * (double)UINT32_MAX);
 }
 
-/* Log protocol errors and check Wayland display connection health. */
 static bool display_is_alive(struct dimmer_app *app) {
     int err = wl_display_get_error(app->display);
     if (err == 0) return true;
@@ -294,7 +281,6 @@ static void commit_overlay(struct output_state *out, bool request_frame) {
     out->last_commit_sec = get_time_sec();
 }
 
-/* Advance one animation step and commit changes. */
 static void tick_overlay(struct output_state *out) {
     if (!out->animating || !out->mapped) return;
 
@@ -329,7 +315,6 @@ static void frame_done(void *data, struct wl_callback *callback, uint32_t time) 
     tick_overlay(out);
 }
 
-/* Advance animations if frame callbacks are stalled (e.g. display blanking). */
 static void advance_stalled_animations(struct dimmer_app *app) {
     double now = get_time_sec();
     for (int i = 0; i < MAX_OUTPUTS; i++) {
@@ -358,7 +343,6 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *la
 
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
-    /* Scale viewport to match configured surface dimensions. */
     if (out->viewport && width > 0 && height > 0) {
         wp_viewport_set_destination(out->viewport, (int32_t)width, (int32_t)height);
     }
@@ -502,7 +486,8 @@ static void output_geometry(void *data, struct wl_output *wl_output, int32_t x, 
     (void)subpixel; (void)make; (void)model; (void)transform;
 }
 
-/* Mode and geometry callbacks (viewport scaling handles surface dimensions). */
+/* Layer-surface configure events set the viewport destination. wl_output geometry
+ * events do not affect the surfaces. */
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags, int32_t width,
                         int32_t height, int32_t refresh) {
     (void)data; (void)wl_output; (void)flags; (void)width; (void)height; (void)refresh;
@@ -535,9 +520,7 @@ static const struct wl_output_listener output_listener = {
     .description = output_description,
 };
 
-/* Never ask for more than the compositor advertises: wl_registry_bind above the
- * advertised version is a protocol error, and the compositor answers by dropping
- * the connection with no explanation the user could act on. */
+/* Binding above what the compositor advertises is a protocol error that closes the connection. */
 static uint32_t bind_version(uint32_t advertised, uint32_t wanted) {
     return advertised < wanted ? advertised : wanted;
 }
@@ -576,9 +559,7 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t i
     } else if (strcmp(interface, wl_shm_interface.name) == 0) {
         app->shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
-        /* wl_output v4 introduced the name event, which is the only way an output
-         * can be addressed by connector name. Below that the helper has nothing to
-         * match ART, DIM, or LAYER against, so say so rather than going silent. */
+        /* wl_output v4 introduced the name event required to address displays by connector. */
         if (version < OUTPUT_VERSION_MIN) {
             fprintf(stderr,
                     "theater-dimmer: compositor advertises wl_output version %u, need at "
@@ -629,7 +610,6 @@ static void registry_global_remove(void *data, struct wl_registry *registry, uin
         destroy_overlay(out);
         destroy_art(out);
         release_output(app, out);
-        /* Return slot to pool for subsequent hotplug detection. */
         memset(out, 0, sizeof(*out));
         return;
     }
@@ -713,7 +693,6 @@ static void handle_dim(struct dimmer_app *app) {
         token = strtok(NULL, ",");
     }
 
-    /* Retarget displays: animate active outputs to target alpha, fade out unselected outputs. */
     for (int i = 0; i < MAX_OUTPUTS; i++) {
         struct output_state *out = &app->outputs[i];
         if (!out->in_use) continue;
@@ -825,8 +804,8 @@ static void handle_layer(struct dimmer_app *app) {
         return;
     }
 
-    /* An unmapped surface picks the layer up at creation; a mapped one is restacked
-     * in place, which needs zwlr_layer_surface_v1.set_layer from version 2. */
+    /* An unmapped surface picks the layer up at creation; a mapped surface is restacked
+     * in place, which requires zwlr_layer_surface_v1.set_layer from version 2. */
     if (out->layer != new_layer) {
         out->layer = new_layer;
         if (out->mapped && out->layer_surface) {

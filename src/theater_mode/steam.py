@@ -28,14 +28,10 @@ ARTWORK_CACHE_TRIM_BYTES = 64 * 1024 * 1024
 
 
 def steam_appid_for_window(resource_class: str, pid: int) -> str | None:
-    """Identify if a window belongs to a Steam game, returning its AppID if detected.
+    """Return a Steam AppID identified from the window class or process, if any.
 
-    Detection Order:
-    1. Filter out known desktop shell/helper classes (e.g., plasmashell, steam client UI).
-    2. Check WM_CLASS matching `steam_app_<appid>` (Proton and standard native games).
-    3. Inspect process environment variables for `SteamGameId` or `SteamAppId`.
-    4. Inspect process command line arguments for `AppId=<appid>` (covers Gamescope
-       sessions where Gamescope launches prior to Steam environment injection).
+    Ignored window classes take precedence, followed by `steam_app_<appid>`, the
+    `SteamGameId` and `SteamAppId` environment keys, and an `AppId` command-line argument.
     """
     if resource_class in IGNORED_CLASSES:
         return None
@@ -58,11 +54,7 @@ def steam_appid_for_window(resource_class: str, pid: int) -> str | None:
 
 
 def find_hero_art(appid: str) -> Path | None:
-    """Locate local cached Steam library hero artwork for a given AppID.
-
-    Note: Local artwork is available for games whose store or library page has been
-    viewed in the Steam client. Returns None if artwork is unavailable.
-    """
+    """Return the largest cached Steam library hero for an AppID, or None if unavailable."""
     try:
         override = get_dev_config().force_art_dir
         library_caches = (override,) if override is not None else STEAM_LIBRARY_CACHES
@@ -76,7 +68,6 @@ def find_hero_art(appid: str) -> Path | None:
         if not candidates:
             return None
 
-        # Pick the largest candidate file (resolving hash directories vs flat layouts)
         return max(candidates, key=lambda p: p.stat().st_size)
     except OSError:
         return None
@@ -99,7 +90,10 @@ def prune_artwork_cache(
     max_bytes: int = ARTWORK_CACHE_MAX_BYTES,
     trim_to_bytes: int = ARTWORK_CACHE_TRIM_BYTES,
 ) -> None:
-    """Evict oldest cached artwork files when total size exceeds max_bytes, trimming to trim_to_bytes."""
+    """Trim an oversized artwork cache by age without removing current_target.
+
+    Ignore filesystem errors and leave non-regular entries untouched.
+    """
     try:
         if not target_cache.is_dir():
             return
@@ -111,7 +105,6 @@ def prune_artwork_cache(
                 st = p.stat()
             except OSError:
                 continue
-            # Only regular files are evictable; unlink on any other entry aborts the prune.
             if not stat.S_ISREG(st.st_mode):
                 continue
             entries.append((p, st.st_size, st.st_mtime))
@@ -133,10 +126,10 @@ def prune_artwork_cache(
 
 
 def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Path | None:
-    """Generate and cache a raw ARGB8888 composite from Steam hero art at target resolution.
+    """Return a cached raw ARGB8888 composite at the requested resolution.
 
-    Overlays hero artwork onto a blurred, darkened ambient background with feathered
-    edges, baking dim_factor directly into image brightness for the dimmer helper.
+    The image has dim_factor baked into its brightness. Return None when source artwork or
+    the helper is unavailable, rendering times out, or an I/O operation fails.
     """
     try:
         source = find_hero_art(appid)
@@ -148,7 +141,6 @@ def build_artwork(appid: str, width: int, height: int, dim_factor: float) -> Pat
             ART_CACHE / f"{appid}-v{ARTWORK_CACHE_VERSION}-{width}x{height}-d{dim_millis:04d}.argb"
         )
         if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
-            # Touch to update recency for LRU cache pruning.
             try:
                 target.touch()
             except OSError:

@@ -1,9 +1,6 @@
 """Health checks for a theater-mode installation.
 
-Answers "why isn't this working" in one command, so a user never has to interpret
-`systemctl` output, hunt through System Settings, or read a journal to file a useful bug
-report. Every check degrades to a finding rather than an exception: the daemon being
-unreachable is the most common reason to run this, so nothing here may depend on it.
+Expected access and availability failures become diagnostic findings.
 """
 
 from __future__ import annotations
@@ -383,7 +380,6 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
                 )
             )
 
-    # Configuration diagnostics: query online daemon, or fall back to offline parser
     raw = _probe(call_dbus, "GetDiagnostics") if status is not None else None
     if raw is not None:
         try:
@@ -446,7 +442,6 @@ def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
         except Exception as e:
             checks.append(Check(section, "Configuration", FAIL, "syntax error", str(e)))
 
-    # Connected displays: query online daemon, or fall back to DRM sysfs
     raw_outputs = _probe(call_dbus, "GetOutputs") if status is not None else None
     outputs: list[dict[str, object]] = []
     if raw_outputs:
@@ -531,7 +526,7 @@ def run_checks(
     env: Mapping[str, str] | None = None,
     run: Runner | None = None,
 ) -> list[Check]:
-    """Collect every diagnostic. Never raises: a failure to check is itself a finding."""
+    """Collect session, installation, service, daemon, and artwork diagnostics."""
     env = os.environ if env is None else env
     run = _run if run is None else run
     return [

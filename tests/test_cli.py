@@ -130,7 +130,6 @@ class TestCLI(unittest.TestCase):
         """Verify boolean formatting matches TOML lowercase spelling."""
         self.assertEqual(_display_value(True), "true")
         self.assertEqual(_display_value(False), "false")
-        # Everything else keeps its plain representation.
         self.assertEqual(_display_value("dim"), "dim")
         self.assertEqual(_display_value(0.85), "0.85")
         self.assertEqual(_display_value(3), "3")
@@ -205,7 +204,6 @@ class TestCLI(unittest.TestCase):
         self.assertIn('[outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]', listing)
         self.assertIn("[outputs.DP-2]", listing)
         self.assertIn("(game display)", listing)
-        # An output without EDID is still listed and addressable by connector.
         self.assertIn("no EDID reported", listing)
         self.assertIn("[outputs.HDMI-A-1]", listing)
 

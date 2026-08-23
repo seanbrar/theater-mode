@@ -24,8 +24,6 @@ from theater_mode.utils import find_helper_binary
 
 log = logging.getLogger("theater-moded")
 
-# The helper speaks Wayland; the config speaks about windows. Translate at the boundary
-# rather than leaking zwlr_layer_shell_v1 vocabulary into a user's config file.
 PLACEMENT_LAYERS = {"over_windows": "overlay", "behind_windows": "bottom"}
 
 
@@ -222,7 +220,6 @@ class DimEffect(Effect):
             return True
 
         targets = sorted(other_outputs)
-        # Read connector EDID once so [outputs.<make:model:serial>] rules can match.
         identities = output_identities() if self._resolved_config is not None else {}
         settings = {output: self._settings_for(output, identities) for output in targets}
 
@@ -235,14 +232,13 @@ class DimEffect(Effect):
                     for name, identity in sorted(identities.items())
                 ),
             )
-        # Read the connector modes once, not once per output.
         sizes = output_modes() if any(s.art for s in settings.values()) else {}
 
         with_art: list[str] = []
         artwork_requests: dict[tuple[str, int, int, float], Path | None] = {}
         for output in targets:
             resolved = settings[output]
-            # Re-sent every time: a helper that has restarted comes back at its default.
+            # A restarted helper has forgotten every output's layer.
             if not self._send(self.layer_command(output, resolved.placement)):
                 return False
             output_size = sizes.get(output) if resolved.art else None

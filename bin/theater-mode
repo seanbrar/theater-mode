@@ -7,8 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-# Locate the theater_mode package: prefer repo src/ if running from a checkout,
-# otherwise fall back to installed XDG data directory.
+# Prefer repo src/ if running from a checkout, otherwise fall back to installed lib.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_LIB = (
     Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "theater-mode" / "lib"

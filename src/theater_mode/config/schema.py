@@ -8,11 +8,9 @@ from typing import Any
 
 from theater_mode.config.provenance import Layer, Provenance
 
-# Allowed choices
 VALID_EASING_CURVES: frozenset[str] = frozenset({"sine", "quad", "cubic", "linear"})
 VALID_PLACEMENTS: frozenset[str] = frozenset({"over_windows", "behind_windows"})
 
-# Defaults
 DEFAULT_PLACEMENT = "over_windows"
 DEFAULT_DIM_FACTOR = 0.85
 DEFAULT_ART = True
@@ -39,7 +37,6 @@ class FieldSpec:
     allow_in_output: bool = True
 
 
-# Schema field declarations
 EFFECT_FIELDS: dict[str, FieldSpec] = {
     "placement": FieldSpec(
         key="placement",

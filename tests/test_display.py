@@ -63,14 +63,13 @@ class TestDisplayDRM(unittest.TestCase):
 
     def test_identities_are_read_from_connector_edid(self) -> None:
         self.connector("card1-DP-1", "connected", edid=build_edid(monitor_name="U3419W"))
-        self.connector("card1-DP-2", "connected")  # no edid file at all
+        self.connector("card1-DP-2", "connected")
 
         identities = output_identities()
 
         self.assertEqual(identities["DP-1"].model, "U3419W")
         self.assertIn("DEL:U3419W:4QCPZY3", identities["DP-1"].match_keys)
 
-        # A connector without readable EDID is still reported, matchable by name.
         self.assertEqual(identities["DP-2"].match_keys, ())
         self.assertEqual(identities["DP-2"].connector, "DP-2")
 
@@ -81,7 +80,7 @@ class TestDisplayDRM(unittest.TestCase):
         identities = output_identities()
 
         self.assertNotEqual(identities["DP-2"].match_keys[0], identities["DP-3"].match_keys[0])
-        # ...but the less specific make:model key is shared by both.
+        # Serial-specific keys differ; the make:model fallback is shared.
         self.assertEqual(identities["DP-2"].match_keys[-1], identities["DP-3"].match_keys[-1])
 
 

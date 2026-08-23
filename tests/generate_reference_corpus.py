@@ -45,7 +45,6 @@ def render_pillow_artwork(source_path: Path, width: int, height: int, dim_factor
         artwork = artwork.convert("RGB")
         src_w, src_h = artwork.width, artwork.height
 
-        # Backdrop: Determine source crop bounding box in source coordinates
         target_ar = width / height
         src_ar = src_w / src_h
         if src_ar > target_ar:
@@ -57,7 +56,6 @@ def render_pillow_artwork(source_path: Path, width: int, height: int, dim_factor
             crop_top = (src_h - crop_h) // 2
             crop_box = (0, crop_top, src_w, crop_top + crop_h)
 
-        # Downscaled backdrop: Resize cropped source to 1/8 scale and blur
         downscale = 8
         low_w = max(1, width // downscale)
         low_h = max(1, height // downscale)
@@ -66,10 +64,8 @@ def render_pillow_artwork(source_path: Path, width: int, height: int, dim_factor
         backdrop_low = backdrop_low.filter(ImageFilter.GaussianBlur(radius=blur_radius))
         backdrop_low = ImageEnhance.Brightness(backdrop_low).enhance(0.45 * brightness)
 
-        # Upscale blurred backdrop to target dimensions
         backdrop = backdrop_low.resize((width, height), Image.Resampling.BILINEAR)
 
-        # Foreground: Contain the complete artwork and feather the exposed axis
         artwork_dimmed = ImageEnhance.Brightness(artwork).enhance(0.75 * brightness)
         fg_scale = min(width / src_w, height / src_h)
         fg_width = max(1, round(src_w * fg_scale))
@@ -94,7 +90,6 @@ def create_pattern_image(width: int, height: int) -> Image.Image:
     im = Image.new("RGB", (width, height), color=(20, 30, 40))
     draw = ImageDraw.Draw(im)
 
-    # Draw color stripes and diagonal shapes
     for y in range(height):
         r = int(255 * y / max(1, height - 1))
         for x in range(0, width, 20):
@@ -102,7 +97,6 @@ def create_pattern_image(width: int, height: int) -> Image.Image:
             b = int(255 * ((x + y) % max(1, width)) / max(1, width - 1))
             draw.rectangle([x, y, min(width - 1, x + 19), y], fill=(r, g, b))
 
-    # Add geometric shapes (circles, rectangles)
     draw.rectangle(
         [width // 8, height // 8, width // 4, height // 4],
         fill=(240, 50, 50),
@@ -124,13 +118,7 @@ def create_pattern_image(width: int, height: int) -> Image.Image:
 
 
 def create_highfreq_image(width: int, height: int) -> Image.Image:
-    """Zone plate plus deterministic noise: broadband content all the way to Nyquist.
-
-    The smooth gradients of create_pattern_image barely move a sinc kernel, so cases built
-    from it understated the Lanczos delta against Pillow roughly fourfold versus real Steam
-    hero art. This pattern is deliberately harder than real artwork, so a green corpus is
-    evidence about production content rather than about the fixture.
-    """
+    """Return a deterministic zone plate and noise image spanning spatial frequencies."""
     buf = bytearray(width * height * 3)
     center_x, center_y = width / 2.0, height / 2.0
     k = math.pi / (2.0 * max(1.0, min(center_x, center_y)))
@@ -153,26 +141,16 @@ def create_highfreq_image(width: int, height: int) -> Image.Image:
 def main() -> None:
     cases = [
         # (case_id, src_w, src_h, target_w, target_h, dim_factor, note)
-        # 1. Wide hero on standard 16:9 (vertical letterbox/feather)
         ("hero_wide_to_16x9", 960, 310, 320, 240, 0.4, "letterbox vertical feather"),
-        # 2. Standard 16:9 hero on 16:9 (exact aspect fit, F=0 opaque)
         ("hero_16x9_to_16x9", 640, 360, 320, 180, 0.0, "exact match opaque"),
-        # 3. Standard 16:9 hero on ultrawide 21:9 (horizontal pillarbox/feather)
         ("hero_16x9_to_ultrawide", 640, 360, 420, 180, 0.5, "pillarbox horizontal feather"),
-        # 4. Portrait hero on 16:9 (horizontal pillarbox/feather)
         ("hero_portrait_to_16x9", 300, 450, 320, 180, 0.2, "portrait pillarbox"),
-        # 5. Full 1080p target (1920x620 hero on 1920x1080)
         ("hero_1080p_wide", 1920, 620, 1920, 1080, 0.4, "full resolution letterbox"),
-        # 6. Real monitor 1600x900 target (exercises Lanczos downscale with fg_scale = 1600/1920 = 0.833)
         ("hero_1600x900_downscale", 1920, 620, 1600, 900, 0.4, "lanczos downscale 1600x900"),
-        # 7. Real monitor 1280x1024 target (exercises Lanczos downscale with fg_scale = 1280/1920 = 0.667)
         ("hero_1280x1024_downscale", 1920, 620, 1280, 1024, 0.3, "lanczos downscale 1280x1024"),
-        # 8. Broadband content at a real monitor size: the case that actually stresses the
-        #    kernel, and the one deliberately kept at full resolution as the upper bound.
+        # The full-size broadband case sets the corpus's peak-error bound.
         ("hero_highfreq_1600x900", 1920, 620, 1600, 900, 0.4, "broadband lanczos downscale"),
-        # 9. Second broadband scale (fg_scale 0.667), kept small since the bound is case 8.
         ("hero_highfreq_640x512", 960, 310, 640, 512, 0.3, "broadband lanczos downscale 0.667"),
-        # 10. PNG source: Steam stores some hero art as PNG under the library_hero.jpg name.
         ("hero_png_source", 640, 360, 960, 540, 0.4, "png source letterbox"),
     ]
     highfreq_cases = {"hero_highfreq_1600x900", "hero_highfreq_640x512"}

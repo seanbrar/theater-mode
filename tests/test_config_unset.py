@@ -104,7 +104,6 @@ class TestUnsetUserConfig(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(removed, {"effect.dim_factor"})
         self.assertEqual(self.path.read_text(), '[effect]\nplacement = "behind_windows"\n')
-        # No temporary files left behind.
         self.assertEqual([p.name for p in self.path.parent.iterdir()], ["config.toml"])
 
     def test_no_matching_key_leaves_the_file_untouched(self) -> None:
@@ -135,7 +134,6 @@ class TestDaemonUnset(unittest.TestCase):
         result = self.daemon.unset('["effect.dim_factor"]')
         self.assertIn("unset 1 keys", result)
         self.assertNotIn("dim_factor", self.path.read_text())
-        # The resolved value must fall back rather than keep the removed override.
         self.assertNotEqual(self.daemon.config.effect.dim_factor, 0.4)
 
     def test_unset_quoted_output_key(self) -> None:
@@ -222,7 +220,6 @@ class TestClientUnsetRouting(unittest.TestCase):
             {"Unset": "error: nothing to unset; rejected: Unknown configuration key"},
         )
         self.assertEqual(code, 1)
-        # It must not go on to ask for the resolved config after a failure.
         self.assertEqual([c[0][0] for c in call.call_args_list], ["Unset"])
 
 

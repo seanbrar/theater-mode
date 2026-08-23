@@ -6,7 +6,6 @@ import os
 import re
 from pathlib import Path
 
-# D-Bus Registration
 BUS_NAME = "com.seanbrar.TheaterMode"
 OBJECT_PATH = "/com/seanbrar/TheaterMode"
 INTERFACE = "com.seanbrar.TheaterMode"
@@ -17,12 +16,10 @@ def _xdg_dir(variable: str, fallback: str) -> Path:
     return Path(os.environ.get(variable) or Path.home() / fallback)
 
 
-# Installed Layout
 APP_DATA = _xdg_dir("XDG_DATA_HOME", ".local/share") / "theater-mode"
 
 LIBEXEC_DIR = Path.home() / ".local/libexec/theater-mode"
 
-# Steam & Artwork Cache Paths
 STEAM_LIBRARY_CACHE = (
     _xdg_dir("XDG_DATA_HOME", ".local/share") / "Steam" / "appcache" / "librarycache"
 )
@@ -54,22 +51,17 @@ STEAM_LIBRARY_CACHES = (
 )
 ART_CACHE = _xdg_dir("XDG_CACHE_HOME", ".cache") / "theater-mode"
 
-# Helper Binaries
 DIMMER_BINARY_NAME = "theater-dimmer"
 ART_BINARY_NAME = "theater-art"
 
-# Session integration. These mirror install.sh: the KWin script is installed as a package
-# directory and switched on through the same kwinrc key System Settings writes.
 KWIN_PLUGIN_ID = "theater-detect"
 KWIN_SCRIPT_DIR = _xdg_dir("XDG_DATA_HOME", ".local/share") / "kwin" / "scripts" / KWIN_PLUGIN_ID
 KWIN_CONFIG_FILE = _xdg_dir("XDG_CONFIG_HOME", ".config") / "kwinrc"
 SERVICE_UNIT = "theater-mode.service"
 
-# Release distribution
 PROJECT_REPO = "seanbrar/theater-mode"
 RELEASE_API = f"https://api.github.com/repos/{PROJECT_REPO}/releases/latest"
 
-# Steam Detection Patterns
 STEAM_APP_CLASS = re.compile(r"^steam_app_(\d+)$")
 STEAM_LAUNCH_ARG = re.compile(r"\bAppId=(\d+)\b")
 
@@ -86,12 +78,8 @@ IGNORED_CLASSES = frozenset(
     }
 )
 
-# KWin Script D-Bus Interface Definition
-#
-# NOTE: Arguments from KWin's script engine are passed as strings (including booleans
-# and numeric IDs) because KWin's callDBus dynamically infers types and cannot reliably
-# produce uint32/boolean primitives without bus-level signature mismatch rejections.
-# Type parsing and normalization are performed explicitly inside the daemon.
+# KWin's callDBus cannot reliably produce primitive types without signature mismatch
+# rejections, so arguments cross D-Bus as strings and the daemon normalizes them.
 INTERFACE_XML = f"""
 <node>
   <interface name='{INTERFACE}'>

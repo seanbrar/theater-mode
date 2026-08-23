@@ -106,9 +106,6 @@ jobs:
               --uninstall --no-service --yes
           [ "$(find "$fake" \( -type f -o -type l \) | wc -l)" -eq 0 ]
 
-      # The path every 'theater-mode update' takes: install.sh --preserve-service replacing
-      # an existing install in place. Nothing else in CI exercises it, and a regression here
-      # breaks upgrades for everyone already running theater-mode.
       - name: Test the in-place upgrade path
         run: |
           set -euo pipefail
@@ -121,7 +118,7 @@ jobs:
           }
 
           run "$root/install.sh" --no-service
-          # Prove the second run actually replaces files rather than skipping them.
+          # Seed files that only a replacement install can repair.
           echo 'stale' > "$fake/.local/libexec/theater-mode/theater-dimmer"
           printf 'stale\n' >> "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py"
 
@@ -157,7 +154,7 @@ jobs:
               HOME="$1" "${@:2}"
           }
 
-          # --build must compile even though the archive ships a prebuilt helper.
+          # --build ignores both prebuilt helpers.
           built="$RUNNER_TEMP/build-home"
           run "$built" "$root/install.sh" --no-service --build
           run "$built" "$built/.local/libexec/theater-mode/theater-dimmer" --version >/dev/null \
@@ -177,7 +174,7 @@ jobs:
           run "$art_built" "$art_built/.local/libexec/theater-mode/theater-art" --version >/dev/null \
             || fail "art-only build produced an unusable helper"
 
-          # --dimmer-bin and --art-bin must install exactly the file they are given.
+          # Explicit helper paths win over every packaged source.
           given="$RUNNER_TEMP/given-home"
           run "$given" "$root/install.sh" --no-service \
             --dimmer-bin src/theater_mode/dimmer/theater-dimmer \
@@ -189,7 +186,7 @@ jobs:
                  "$given/.local/libexec/theater-mode/theater-art" \
             || fail "--art-bin did not install the helper it was given"
 
-          # A helper that cannot execute must be refused before anything is installed.
+          # Helper verification runs before installation starts.
           bad="$RUNNER_TEMP/bad-helper"
           printf '#!/nonexistent\n' > "$bad"
           chmod +x "$bad"

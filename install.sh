@@ -105,7 +105,6 @@ place() {
     info "$dest"
 }
 
-# Render systemd unit template with the target daemon binary path.
 render_unit() {
     local src="$REPO/systemd/theater-mode.service"
     local escaped tmp line rendered=0
@@ -140,7 +139,6 @@ render_unit() {
     info "$UNIT"
 }
 
-# Remove native-helper sources and bytecode caches from the installed library.
 prune_package_copy() {
     rm -rf "$APP_DATA/lib/theater_mode/dimmer" "$APP_DATA/lib/theater_mode/art"
     find "$APP_DATA/lib/theater_mode" -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -260,8 +258,8 @@ check_prerequisites() {
             || missing+=("python3 gobject bindings (python3-gobject / python-gobject)")
     fi
 
-    # Wayland development files are a build-time need only. Installing a prebuilt helper
-    # requires just the runtime library, which every Wayland session already has.
+    # A prebuilt dimmer is verified by execution; headers and pkg-config apply only when
+    # compiling one here.
     if [ "$NEEDS_DIMMER_BUILD" -eq 1 ] && command -v pkg-config >/dev/null; then
         pkg-config --exists wayland-client \
             || missing+=("libwayland client development files (wayland-devel / libwayland-dev / wayland)")
@@ -275,7 +273,6 @@ check_prerequisites() {
     fi
 }
 
-# Warn if theater-mode is not in PATH or is shadowed by an earlier executable.
 check_client_reachable() {
     local found
     hash -r 2>/dev/null || true
@@ -409,9 +406,8 @@ EOF
     fi
 
     if [ "$SERVICE" -eq 2 ]; then
-        # Every file is already in place by now, so the update has succeeded whatever
-        # systemd says. Without a running user session (ssh, no lingering) daemon-reload
-        # fails; warn and leave the new files, rather than reporting a failed update.
+        # An update is complete once its files are in place. An unreachable user manager
+        # leaves service reload for the next desktop session.
         local was_active=0 restarted=0
         systemctl --user is-active --quiet theater-mode.service && was_active=1
         if ! systemctl --user daemon-reload 2>/dev/null; then
@@ -442,7 +438,6 @@ EOF
 
     enable_unit
 
-    # Defer service start if no systemd user session is currently reachable (e.g. over SSH).
     if ! systemctl --user daemon-reload 2>/dev/null; then
         activate_kwin_script || true
         cat <<EOF

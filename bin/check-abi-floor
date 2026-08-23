@@ -17,7 +17,6 @@ ALLOWED_LIBS="${3:-libc.so.6 libm.so.6 libwayland-client.so.0}"
 
 command -v readelf >/dev/null || die "readelf not found (install binutils)"
 
-# --- glibc symbol versions -------------------------------------------------
 mapfile -t versions < <(readelf -V "$BIN" | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -uV)
 [ "${#versions[@]}" -gt 0 ] || die "$BIN references no glibc symbols at all; is it a dynamic ELF?"
 
@@ -33,7 +32,6 @@ if [ "$(printf '%s\n%s\n' "$MAX_GLIBC" "$highest" | sort -V | tail -1)" != "$MAX
     die "build against an older baseline, or avoid these symbols"
 fi
 
-# --- shared library dependencies -------------------------------------------
 unexpected=()
 while read -r lib; do
     [ -n "$lib" ] || continue
@@ -49,7 +47,6 @@ if [ "${#unexpected[@]}" -gt 0 ]; then
     die "allowed: $ALLOWED_LIBS"
 fi
 
-# --- ELF hardening ---------------------------------------------------------
 [ "$(readelf -h "$BIN" | sed -n 's/.*Type:[[:space:]]*\([^[:space:]]*\).*/\1/p')" = DYN ] \
     || die "$BIN is not position-independent (PIE)"
 readelf -lW "$BIN" | grep -q 'GNU_RELRO' || die "$BIN has no GNU_RELRO segment"

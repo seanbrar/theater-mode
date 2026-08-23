@@ -85,8 +85,7 @@ function methodsSince(marker) {
     });
 }
 
-// Fire timer timeout signal, marking single-shot timers inactive first as Qt does.
-// Emitting `timeout` directly would fire a timer that was never started.
+// Mark single-shot timers inactive before invoking their timeout handlers.
 function fire(timer) {
     if (timer.singleShot) {
         timer.running = false;
