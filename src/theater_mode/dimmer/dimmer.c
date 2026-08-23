@@ -114,8 +114,8 @@ struct dimmer_app {
     struct wp_alpha_modifier_v1 *alpha_modifier;
     struct wl_shm *shm;
 
-    /* 1x1 opaque black single-pixel buffer shared across plain dim surfaces. */
     struct wl_buffer *black;
+    struct wl_buffer *translucent_black;
 
     struct output_state outputs[MAX_OUTPUTS];
     bool running;
@@ -275,7 +275,12 @@ static void commit_overlay(struct output_state *out, bool request_frame) {
         wp_alpha_modifier_surface_v1_set_multiplier(out->alpha_surface,
                                                     alpha_to_multiplier(out->current_alpha));
     }
-    wl_surface_attach(out->surface, out->art ? out->art : out->app->black, 0, 0);
+    struct wl_buffer *buffer = out->art;
+    if (!buffer) {
+        buffer = out->current_alpha < 1.0 ? out->app->translucent_black : out->app->black;
+    }
+    wl_surface_attach(out->surface, buffer, 0, 0);
+
     wl_surface_damage_buffer(out->surface, 0, 0, INT32_MAX, INT32_MAX);
     wl_surface_commit(out->surface);
     out->last_commit_sec = get_time_sec();
@@ -395,6 +400,9 @@ static int map_overlay(struct dimmer_app *app, struct output_state *out) {
     /* Empty input region allows mouse and keyboard events to pass through. */
     struct wl_region *empty_region = wl_compositor_create_region(app->compositor);
     wl_surface_set_input_region(out->surface, empty_region);
+    /* KWin overrides this hint for buffers without an alpha channel. Partial flat
+     * overlays use translucent_black so content underneath is repainted before blending. */
+    wl_surface_set_opaque_region(out->surface, empty_region);
     wl_region_destroy(empty_region);
 
     out->viewport = wp_viewporter_get_viewport(app->viewporter, out->surface);
@@ -937,9 +945,10 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Pre-multiplied single pixel buffer for black overlays. */
     app.black = wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(
         app.pixel_buffers, 0, 0, 0, UINT32_MAX);
+    app.translucent_black = wp_single_pixel_buffer_manager_v1_create_u32_rgba_buffer(
+        app.pixel_buffers, 0, 0, 0, UINT32_MAX - 1);
 
     int stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, stdin_flags | O_NONBLOCK);
@@ -1029,6 +1038,7 @@ int main(int argc, char **argv) {
     }
 
     if (app.black) wl_buffer_destroy(app.black);
+    if (app.translucent_black) wl_buffer_destroy(app.translucent_black);
     if (app.alpha_modifier) wp_alpha_modifier_v1_destroy(app.alpha_modifier);
     if (app.shm) wl_shm_destroy(app.shm);
     if (app.pixel_buffers) wp_single_pixel_buffer_manager_v1_destroy(app.pixel_buffers);
