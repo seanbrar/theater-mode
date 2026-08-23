@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import subprocess
 import sys
@@ -10,8 +11,15 @@ from collections.abc import Callable
 from typing import Any
 
 from theater_mode import __version__
-from theater_mode.config import split_key_path
+from theater_mode.config import lookup_spec, split_key_path
 from theater_mode.constants import APP_DATA, BUS_NAME, INTERFACE, OBJECT_PATH
+from theater_mode.utils import plural
+
+_NOT_RUNNING_MARKERS = (
+    "ServiceUnknown",
+    "NameHasNoOwner",
+    "was not provided by any .service files",
+)
 
 
 def _call_dbus_method(method_name: str, *args: Any) -> str:
@@ -41,7 +49,19 @@ def _call_dbus_method(method_name: str, *args: Any) -> str:
         )
         return result.unpack()[0]
     except Exception as e:
-        print(f"error: failed connecting to theater-moded daemon over D-Bus: {e}", file=sys.stderr)
+        # Only an unowned D-Bus name means the service is stopped. Every other error keeps
+        # its own text, so a real failure is not disguised as a missing service.
+        if any(marker in str(e) for marker in _NOT_RUNNING_MARKERS):
+            print(
+                "error: the theater-mode background service is not running.\n"
+                "  Start it with: systemctl --user restart theater-mode.service\n"
+                "  Then check:    theater-mode doctor",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"error: could not reach the theater-mode background service: {e}", file=sys.stderr
+            )
         sys.exit(1)
 
 
@@ -96,7 +116,7 @@ def _format_diagnostics(diag_list: list[dict[str, Any]]) -> str:
     if not diag_list:
         return "✓ No configuration diagnostics or warnings."
 
-    lines: list[str] = [f"Found {len(diag_list)} configuration diagnostic(s):\n"]
+    lines: list[str] = [f"Found {plural(len(diag_list), 'configuration diagnostic')}:\n"]
     for idx, d in enumerate(diag_list, start=1):
         sev = d.get("severity", "error").upper()
         msg = d.get("message", "")
@@ -143,6 +163,46 @@ def _format_outputs(outputs: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _format_status(data: dict[str, Any]) -> str:
+    """Summarize daemon state in plain language.
+
+    Reports only what the daemon tracks. Games are named by AppID because nothing in
+    the pipeline resolves an AppID to its store title.
+    """
+    dimmed = data.get("affected_outputs") or []
+    games = data.get("games") or []
+    outputs = data.get("outputs") or []
+    secondary = data.get("secondary_outputs") or []
+
+    if dimmed:
+        headline = f"theater-mode is dimming {plural(len(dimmed), 'display')}."
+    elif data.get("revert_pending"):
+        headline = "theater-mode is restoring your displays."
+    elif games and data.get("require_fullscreen") and data.get("active_output") is None:
+        headline = "theater-mode is waiting for the game to enter fullscreen."
+    elif games and data.get("active_output") is not None and secondary:
+        headline = "theater-mode sees the game, but dimming is zero on every other display."
+    elif games and data.get("active_output") is not None:
+        headline = "theater-mode sees the game, but there are no other displays to dim."
+    elif games:
+        headline = "theater-mode sees a game, but nothing is dimmed yet."
+    else:
+        headline = "theater-mode is idle, waiting for a Steam game."
+
+    lines = [headline]
+    for game in games:
+        where = game.get("output") or "an unknown display"
+        pending = "" if game.get("fullscreen") else " (not fullscreen)"
+        lines.append(f"  Game:      AppID {game.get('appid')} on {where}{pending}")
+    if dimmed:
+        lines.append(f"  Dimmed:    {', '.join(dimmed)}")
+    if outputs:
+        lines.append(f"  Displays:  {', '.join(outputs)}")
+    if dimmed and not data.get("effect_process_running"):
+        lines.append("  The dimmer helper is not running. Run 'theater-mode doctor' for detail.")
+    return "\n".join(lines)
+
+
 _MISSING = object()
 
 
@@ -173,17 +233,39 @@ def _lookup(data: dict[str, Any], key: str) -> Any:
     return _MISSING
 
 
-def _parse_cli_value(val_str: str) -> Any:
-    """Parse scalar CLI value into bool, float, int, or string."""
-    lower = val_str.strip().lower()
+_TRUE_WORDS = frozenset({"true", "yes", "on", "1", "enable", "enabled"})
+_FALSE_WORDS = frozenset({"false", "no", "off", "0", "disable", "disabled"})
+
+
+def _parse_cli_value(val_str: str, key: str | None = None) -> Any:
+    """Parse a scalar CLI value, consulting the schema when the key is known.
+
+    A boolean key also accepts the everyday spellings of yes and no; a numeric key also
+    accepts a trailing percent sign. Without a key the value is read by shape alone,
+    which is what lets _display_value round-trip back through this function.
+
+    Values the schema would refuse are returned unchanged for the daemon to reject, so
+    the error names the key rather than the parse.
+    """
+    text = val_str.strip()
+    lower = text.lower()
+    type_name = spec.type_name if key and (spec := lookup_spec(key)) else None
+
+    if type_name == "boolean":
+        if lower in _TRUE_WORDS:
+            return True
+        if lower in _FALSE_WORDS:
+            return False
+    elif type_name == "float" and lower.endswith("%"):
+        with contextlib.suppress(ValueError):
+            return float(lower[:-1].strip()) / 100.0
+
     if lower == "true":
         return True
     if lower == "false":
         return False
     try:
-        if "." in val_str:
-            return float(val_str)
-        return int(val_str)
+        return float(text) if "." in text else int(text)
     except ValueError:
         return val_str
 
@@ -216,7 +298,10 @@ def main(
     parser.add_argument("--version", action="version", version=f"theater-mode {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("status", help="Show current daemon state and tracked windows")
+    status_p = subparsers.add_parser("status", help="Show what theater-mode is doing now")
+    status_p.add_argument(
+        "--json", action="store_true", help="Output raw JSON instead of a summary"
+    )
 
     config_parser = subparsers.add_parser("config", help="Manage daemon configuration")
     config_sub = config_parser.add_subparsers(dest="config_cmd", required=True)
@@ -228,10 +313,10 @@ def main(
     diag_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
     get_p = config_sub.add_parser("get", help="Get a single resolved configuration value")
-    get_p.add_argument("key", help="Key path (e.g. effect.dim_factor or outputs.DP-1.dim_factor)")
+    get_p.add_argument("key", help="Key path (e.g. effect.dimming or outputs.DP-1.dimming)")
 
     set_p = config_sub.add_parser("set", help="Permanently commit setting to user config file")
-    set_p.add_argument("key", help="Key path (e.g. effect.dim_factor)")
+    set_p.add_argument("key", help="Key path (e.g. effect.dimming)")
     set_p.add_argument("value", help="New value")
 
     unset_p = config_sub.add_parser(
@@ -240,7 +325,7 @@ def main(
     unset_p.add_argument("keys", nargs="+", metavar="KEY", help="Key path(s) to remove")
 
     prev_p = config_sub.add_parser("preview", help="Preview setting in-session without saving")
-    prev_p.add_argument("key", help="Key path (e.g. effect.dim_factor)")
+    prev_p.add_argument("key", help="Key path (e.g. effect.dimming)")
     prev_p.add_argument("value", help="Preview value")
 
     config_sub.add_parser(
@@ -298,7 +383,8 @@ def main(
 
     match args.command, getattr(args, "config_cmd", None):
         case "status", _:
-            print(call_dbus("Status"))
+            raw = call_dbus("Status")
+            print(raw if args.json else _format_status(json.loads(raw)))
         case "simulate", _:
             print(call_dbus("Simulate", args.appid, args.output))
         case "clear", _:
@@ -329,10 +415,14 @@ def main(
 
         case "config", "set" | "preview" as sub:
             method = "Commit" if sub == "set" else "Preview"
-            result = call_dbus(method, json.dumps({args.key: _parse_cli_value(args.value)}))
+            value = _parse_cli_value(args.value, args.key)
+            result = call_dbus(method, json.dumps({args.key: value}))
             print(result)
             if result.startswith("error") or "rejected:" in result:
                 return 1
+            resolved = _lookup(json.loads(call_dbus("GetResolved")), args.key)
+            if resolved is not _MISSING and not isinstance(resolved, dict):
+                print(f"  {args.key} is now {_display_value(resolved)}")
 
         case "config", "unset":
             result = call_dbus("Unset", json.dumps(args.keys))

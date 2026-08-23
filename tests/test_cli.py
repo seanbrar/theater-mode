@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -47,8 +48,15 @@ class TestCLI(unittest.TestCase):
             result = daemon_main([])
             self.assertEqual(result, 1)
 
-    def _run_client(self, argv: list[str], response: str) -> tuple[int, str, str, MagicMock]:
-        call_dbus = MagicMock(return_value=response)
+    def _run_client(
+        self, argv: list[str], response: str | list[str]
+    ) -> tuple[int, str, str, MagicMock]:
+        # A list scripts consecutive replies for commands that make more than one call.
+        call_dbus = (
+            MagicMock(side_effect=response)
+            if isinstance(response, list)
+            else MagicMock(return_value=response)
+        )
         stdout, stderr = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = client_main(argv, call_dbus=call_dbus)
@@ -75,10 +83,10 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(args.system_config_override, Path("/tmp/test_sys.toml"))
 
     def test_effects_are_built_from_options(self) -> None:
-        options = EffectOptions(dim_factor=0.5, dim_duration=9.0, dim_curve="quad", art=False)
+        options = EffectOptions(dimming=0.5, dim_duration=9.0, dim_curve="quad", art=False)
 
         effect = DimEffect.create(options)
-        self.assertEqual(effect._dim_factor, 0.5)
+        self.assertEqual(effect._dimming, 0.5)
         self.assertEqual(effect._duration, 9.0)
         self.assertEqual(effect._curve, "quad")
         self.assertFalse(effect._art)
@@ -92,28 +100,28 @@ class TestCLI(unittest.TestCase):
 
     def test_client_formatting(self) -> None:
         config_data = {
-            "effect": {"mode": "dim", "dim_factor": 0.85, "art": True},
+            "effect": {"mode": "dim", "dimming": 0.85, "art": True},
             "transition": {"duration": 2.0, "curve": "sine"},
             "daemon": {"revert_delay": 3.0, "stage_delay": 1.5, "require_fullscreen": False},
-            "outputs": {"DP-1": {"dim_factor": 0.5}},
+            "outputs": {"DP-1": {"dimming": 0.5}},
             "provenance": {
-                "effect.dim_factor": {
+                "effect.dimming": {
                     "layer": "user",
                     "file": "/home/user/.config/config.toml",
                     "line": 4,
                 },
-                "outputs.DP-1.dim_factor": {"layer": "session", "file": None, "line": None},
+                "outputs.DP-1.dimming": {"layer": "session", "file": None, "line": None},
             },
         }
         table = _format_provenance_table(config_data)
-        self.assertIn("effect.dim_factor", table)
-        self.assertIn("outputs.DP-1.dim_factor", table)
+        self.assertIn("effect.dimming", table)
+        self.assertIn("outputs.DP-1.dimming", table)
         self.assertIn("user", table)
         self.assertIn("session", table)
 
         diags = [
             {
-                "key_path": "effect.dim_factor",
+                "key_path": "effect.dimming",
                 "message": "Value 1.5 exceeds maximum 1.0",
                 "severity": "error",
                 "file": "/tmp/test.toml",
@@ -166,16 +174,16 @@ class TestCLI(unittest.TestCase):
     def test_client_lookup_handles_output_ids_containing_dots(self) -> None:
         edid = "Dell Inc.:DELL S2721QS:4QCPZY3"
         data = {
-            "effect": {"mode": "dim", "dim_factor": 0.85},
-            "outputs": {edid: {"dim_factor": 0.3}},
+            "effect": {"mode": "dim", "dimming": 0.85},
+            "outputs": {edid: {"dimming": 0.3}},
         }
 
-        self.assertEqual(_lookup(data, "effect.dim_factor"), 0.85)
-        self.assertEqual(_lookup(data, f"outputs.{edid}.dim_factor"), 0.3)
-        self.assertEqual(_lookup(data, f'outputs."{edid}".dim_factor'), 0.3)
+        self.assertEqual(_lookup(data, "effect.dimming"), 0.85)
+        self.assertEqual(_lookup(data, f"outputs.{edid}.dimming"), 0.3)
+        self.assertEqual(_lookup(data, f'outputs."{edid}".dimming'), 0.3)
         self.assertEqual(_lookup(data, "effect"), data["effect"])
         self.assertIs(_lookup(data, "effect.nope"), _MISSING)
-        self.assertIs(_lookup(data, "outputs.DP-9.dim_factor"), _MISSING)
+        self.assertIs(_lookup(data, "outputs.DP-9.dimming"), _MISSING)
 
     def test_client_formats_output_identities(self) -> None:
         listing = _format_outputs(
@@ -212,7 +220,6 @@ class TestCLI(unittest.TestCase):
 
     def test_client_main_simple_commands(self) -> None:
         cases = [
-            (["status"], "Status", (), "Daemon active: 1 window(s)"),
             (["simulate", "1671210", "DP-1"], "Simulate", ("1671210", "DP-1"), "simulated"),
             (["clear"], "Clear", (), "cleared"),
             (["config", "revert-preview"], "RevertPreview", (), "preview reverted"),
@@ -224,6 +231,44 @@ class TestCLI(unittest.TestCase):
                 self.assertEqual(result, 0)
                 self.assertEqual(stdout.strip(), response)
                 call_dbus.assert_called_once_with(method, *args)
+
+    def test_client_main_status_summarizes_and_passes_through_json(self) -> None:
+        raw = json.dumps(
+            {
+                "affected_outputs": ["DP-2"],
+                "effect_process_running": True,
+                "games": [{"appid": "1245620", "output": "DP-1", "fullscreen": True}],
+                "outputs": ["DP-1", "DP-2"],
+            }
+        )
+        result, stdout, _, call_dbus = self._run_client(["status"], raw)
+        self.assertEqual(result, 0)
+        self.assertIn("dimming 1 display", stdout)
+        self.assertIn("AppID 1245620 on DP-1", stdout)
+        self.assertIn("Dimmed:    DP-2", stdout)
+        call_dbus.assert_called_once_with("Status")
+
+        result, stdout, _, _ = self._run_client(["status", "--json"], raw)
+        self.assertEqual(result, 0)
+        self.assertEqual(stdout.strip(), raw)
+
+    def test_client_main_status_idle(self) -> None:
+        raw = json.dumps({"affected_outputs": [], "games": [], "outputs": ["DP-1"]})
+        _, stdout, _, _ = self._run_client(["status"], raw)
+        self.assertIn("idle, waiting for a Steam game", stdout)
+
+    def test_client_main_status_explains_nullified_outputs(self) -> None:
+        raw = json.dumps(
+            {
+                "active_output": "DP-1",
+                "affected_outputs": [],
+                "secondary_outputs": ["DP-2"],
+                "games": [{"appid": "1245620", "output": "DP-1", "fullscreen": True}],
+                "outputs": ["DP-1", "DP-2"],
+            }
+        )
+        _, stdout, _, _ = self._run_client(["status"], raw)
+        self.assertIn("dimming is zero on every other display", stdout)
 
     def test_client_main_outputs(self) -> None:
         raw_json = '[{"connector": "DP-1", "active": true, "match_keys": ["Dell"]}]'
@@ -237,9 +282,7 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(stdout.strip(), raw_json)
 
     def test_client_main_config_show_and_diagnostics(self) -> None:
-        raw_config = (
-            '{"effect": {"mode": "dim", "dim_factor": 0.85}, "transition": {}, "daemon": {}}'
-        )
+        raw_config = '{"effect": {"mode": "dim", "dimming": 0.85}, "transition": {}, "daemon": {}}'
         result, stdout, _, _ = self._run_client(["config", "show"], raw_config)
         self.assertEqual(result, 0)
         self.assertIn("Resolved Configuration", stdout)
@@ -253,8 +296,8 @@ class TestCLI(unittest.TestCase):
         self.assertIn("No configuration diagnostics", stdout)
 
     def test_client_main_config_get(self) -> None:
-        raw_config = '{"effect": {"dim_factor": 0.85, "mode": "dim"}}'
-        result, stdout, _, _ = self._run_client(["config", "get", "effect.dim_factor"], raw_config)
+        raw_config = '{"effect": {"dimming": 0.85, "mode": "dim"}}'
+        result, stdout, _, _ = self._run_client(["config", "get", "effect.dimming"], raw_config)
         self.assertEqual(result, 0)
         self.assertEqual(stdout.strip(), "0.85")
 
@@ -263,23 +306,54 @@ class TestCLI(unittest.TestCase):
         self.assertIn("error: key 'nonexistent.key' not found", stderr)
 
     def test_client_main_config_set_and_preview(self) -> None:
-        result, _, _, call_dbus = self._run_client(
-            ["config", "set", "effect.dim_factor", "0.5"], "committed 1 keys"
+        result, stdout, _, call_dbus = self._run_client(
+            ["config", "set", "effect.dimming", "0.5"],
+            ["committed 1 key", '{"effect": {"dimming": 0.5}}'],
         )
         self.assertEqual(result, 0)
-        call_dbus.assert_called_once_with("Commit", '{"effect.dim_factor": 0.5}')
+        self.assertEqual(call_dbus.call_args_list[0][0], ("Commit", '{"effect.dimming": 0.5}'))
+        self.assertIn("effect.dimming is now 0.5", stdout)
 
         result, _, _, _ = self._run_client(
-            ["config", "set", "effect.dim_factor", "99"],
+            ["config", "set", "effect.dimming", "99"],
             "error: nothing to commit (rejected: value 99 exceeds maximum)",
         )
         self.assertEqual(result, 1)
 
-        result, _, _, call_dbus = self._run_client(
-            ["config", "preview", "effect.dim_factor", "0.3"], "preview applied"
+        result, stdout, _, call_dbus = self._run_client(
+            ["config", "preview", "effect.dimming", "0.3"],
+            ["preview applied for 1 key", '{"effect": {"dimming": 0.3}}'],
         )
         self.assertEqual(result, 0)
-        call_dbus.assert_called_once_with("Preview", '{"effect.dim_factor": 0.3}')
+        self.assertEqual(call_dbus.call_args_list[0][0], ("Preview", '{"effect.dimming": 0.3}'))
+        self.assertIn("effect.dimming is now 0.3", stdout)
+
+    def test_client_main_config_set_accepts_everyday_spellings(self) -> None:
+        for value, expected in (("yes", "true"), ("on", "true"), ("off", "false")):
+            with self.subTest(value=value):
+                _, _, _, call_dbus = self._run_client(
+                    ["config", "set", "effect.art", value],
+                    ["committed 1 key", '{"effect": {"art": true}}'],
+                )
+                self.assertEqual(
+                    call_dbus.call_args_list[0][0],
+                    ("Commit", f'{{"effect.art": {expected}}}'),
+                )
+
+        _, _, _, call_dbus = self._run_client(
+            ["config", "set", "effect.dimming", "75%"],
+            ["committed 1 key", '{"effect": {"dimming": 0.75}}'],
+        )
+        self.assertEqual(call_dbus.call_args_list[0][0], ("Commit", '{"effect.dimming": 0.75}'))
+
+    def test_client_rejects_nonfinite_percentage(self) -> None:
+        result, _, _, call_dbus = self._run_client(
+            ["config", "set", "effect.dimming", "nan%"],
+            "error: no valid settings to commit; rejected: cannot be NaN or infinity",
+        )
+        self.assertEqual(result, 1)
+        payload = json.loads(call_dbus.call_args.args[1])
+        self.assertTrue(payload["effect.dimming"] != payload["effect.dimming"])
 
     def test_client_main_version(self) -> None:
         stdout = io.StringIO()

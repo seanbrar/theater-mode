@@ -224,7 +224,7 @@ verify_helper() {
         case "$out" in
             *GLIBC_*)
                 printf '  This build targets a newer glibc than this system provides.\n' >&2
-                printf '  Compile one for this machine instead: ./install.sh --build\n' >&2
+                printf '  Build one for this machine instead: ./install.sh --build\n' >&2
                 ;;
             *libwayland-client*)
                 printf '  libwayland-client.so.0 is missing. Install your distribution wayland runtime.\n' >&2
@@ -278,7 +278,7 @@ check_client_reachable() {
     hash -r 2>/dev/null || true
     found="$(command -v theater-mode 2>/dev/null || true)"
     if [ -z "$found" ]; then
-        warn "$BIN_DIR is not in your PATH. You may need to add it to your ~/.bashrc or ~/.profile."
+        warn "$BIN_DIR is not in this shell's PATH. Open a new terminal, or run theater-mode by its full path: $CLIENT doctor"
     elif ! [ "$found" -ef "$CLIENT" ]; then
         warn "$found comes earlier in your PATH and will shadow $CLIENT"
     fi
@@ -297,14 +297,14 @@ check_desktop_session() {
 
     case "$desktop" in
         *gamescope*)
-            die "Game Mode is not supported; install from a KDE Plasma desktop session"
+            die "theater-mode runs in Desktop Mode, not Game Mode. Switch to Desktop Mode from the power menu, then run this installer again."
             ;;
         *kde*|*plasma*) ;;
         "")
             die "no desktop session detected; install from a terminal inside KDE Plasma"
             ;;
         *)
-            die "KDE Plasma is required (detected desktop: ${XDG_CURRENT_DESKTOP:-$DESKTOP_SESSION})"
+            die "theater-mode requires KDE Plasma and cannot run on ${XDG_CURRENT_DESKTOP:-$DESKTOP_SESSION}. No other desktop environment is supported."
             ;;
     esac
 
@@ -469,12 +469,11 @@ is not on will dim.
 Try:
   theater-mode status              Show what the daemon currently sees
   theater-mode config show         Inspect settings and where each one came from
-  theater-mode config set effect.dim_factor 0.75
+  theater-mode config set effect.dimming 0.75
 
   theater-mode update              Upgrade to the latest release
   theater-mode uninstall           Remove it again
 
-Logs:      journalctl --user -u theater-mode.service -f
 Reference: $REF_CONFIG
 EOF
     else
@@ -520,7 +519,9 @@ do_uninstall() {
     echo
 
     if [ "$FORCE" -eq 0 ]; then
-        read -r -p "Remove the $found item(s) above? [y/N] " reply
+        local noun="items"
+        [ "$found" -eq 1 ] && noun="item"
+        read -r -p "Remove the $found $noun above? [y/N] " reply
         [ "$reply" = y ] || [ "$reply" = Y ] || { echo "Cancelled."; return 0; }
     fi
 

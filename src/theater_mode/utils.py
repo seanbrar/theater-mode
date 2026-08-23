@@ -9,6 +9,11 @@ from pathlib import Path
 from theater_mode.constants import LIBEXEC_DIR
 
 
+def plural(count: int, singular: str, suffix: str = "s") -> str:
+    """Render a count beside its noun, choosing the singular form at exactly one."""
+    return f"{count} {singular}{'' if count == 1 else suffix}"
+
+
 def parse_bool(value: str | bool) -> bool:
     """Parse string representation of boolean values safely."""
     if isinstance(value, bool):

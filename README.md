@@ -90,12 +90,12 @@ The built-in settings are ready to use. These are the most common changes:
 
 ```sh
 # Make the other monitors a little brighter. 0 is unchanged; 1 is completely black.
-theater-mode config set effect.dim_factor 0.75
+theater-mode config set effect.dimming 0.75
 
 # Keep windows on the other monitors visible, with artwork behind them.
-# Pair this with a lower dim_factor (such as 0.35) so the wallpaper stays bright and clear.
+# Pair this with a lower dimming (such as 0.35) so the artwork stays bright and clear.
 theater-mode config set effect.placement behind_windows
-theater-mode config set effect.dim_factor 0.35
+theater-mode config set effect.dimming 0.35
 
 # Use a plain dark screen instead of Steam artwork.
 theater-mode config set effect.art false
@@ -127,7 +127,7 @@ you want to change. Add settings below it, for example:
 
 ```toml
 [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
-dim_factor = 0.50
+dimming = 0.50
 placement = "behind_windows"
 art = false
 ```
@@ -136,7 +136,10 @@ The manufacturer, model, and serial number let the setting follow the physical m
 if you move its cable to another port. If a monitor does not provide that information,
 use the suggested connector heading such as `[outputs.DP-2]` instead.
 
-Per-monitor settings can change `placement`, `dim_factor`, `art`, `duration`, and `curve`.
+Per-monitor settings can change `placement`, `dimming`, `art`, `duration`, and `curve`.
+
+To leave one monitor out of theater mode entirely, give it `dimming = 0`. That monitor is
+never dimmed and never shows artwork, whatever the other settings say.
 
 </details>
 
