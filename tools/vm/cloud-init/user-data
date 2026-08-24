@@ -1,0 +1,102 @@
+#cloud-config
+# Provisioning for the theater-mode Arch test guest.
+#
+# The guest exists to answer one question: does the current checkout install and run on a
+# current Arch Linux Plasma system. It is therefore deliberately plain --
+# upstream Arch, upstream Plasma, no AUR, no dotfiles, nothing that could make an install
+# succeed here for a reason a user's machine would not share.
+
+users:
+  - name: tester
+    groups: [wheel, video, input]
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    shell: /bin/bash
+    lock_passwd: false
+    # Password is "tester". This guest is a throwaway on a user-mode network with no
+    # forwarded ports; it holds nothing and is reachable from nowhere.
+    plain_text_passwd: tester
+
+package_update: true
+package_upgrade: true
+packages:
+  - plasma-desktop
+  - plasma-workspace
+  - sddm
+  - xorg-xwayland
+  - konsole
+  - kwrite
+  - ttf-dejavu
+  - noto-fonts
+  - python
+  - python-gobject
+  - hwdata
+  - wayland-utils
+  - mesa
+  - vulkan-swrast
+
+write_files:
+  # Autologin straight into a Plasma Wayland session: the guest is booted to be looked
+  # at, and a login prompt only adds a step to every run.
+  - path: /etc/sddm.conf.d/autologin.conf
+    content: |
+      [Autologin]
+      User=tester
+      Session=plasma
+
+  # The checkout arrives over 9p rather than being copied in, so the guest always tests
+  # the tree as it is on the host right now.
+  - path: /etc/systemd/system/mnt-theater.mount
+    content: |
+      [Unit]
+      Description=theater-mode checkout from the host
+      [Mount]
+      What=theater
+      Where=/mnt/theater
+      Type=9p
+      Options=trans=virtio,version=9p2000.L,ro,access=any
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/bin/theater-vm-check
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      repo=/mnt/theater
+      dimmer="$repo/src/theater_mode/dimmer/theater-dimmer"
+      art="$repo/src/theater_mode/art/theater-art"
+
+      [ "$(id -u)" -ne 0 ] || { echo "Run theater-vm-check as the desktop user." >&2; exit 1; }
+      [ -x "$dimmer" ] && [ -x "$art" ] || {
+          echo "Build both helpers in theater-mode-dev on the host, then retry." >&2
+          exit 1
+      }
+
+      # An SSH connection carries no session environment, and `doctor` reads a missing
+      # XDG_CURRENT_DESKTOP as a failed installation rather than as a missing terminal.
+      # Plasma publishes the session's real values to the systemd user manager when it
+      # starts, which is the same thing a desktop terminal would have inherited.
+      if [ -z "${XDG_CURRENT_DESKTOP:-}" ]; then
+          XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export XDG_RUNTIME_DIR
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          published="$(systemctl --user show-environment 2>/dev/null || true)"
+          for key in XDG_SESSION_TYPE XDG_CURRENT_DESKTOP WAYLAND_DISPLAY DISPLAY; do
+              value="$(printf '%s\n' "$published" | sed -n "s/^$key=//p")"
+              if [ -n "$value" ]; then
+                  export "$key=$value"
+              fi
+          done
+      fi
+
+      "$repo/install.sh" --dimmer-bin="$dimmer" --art-bin="$art"
+      "$HOME/.local/bin/theater-mode" doctor
+
+runcmd:
+  - |
+    set -eu
+    install -d -m 0755 /mnt/theater
+    python3 -c 'import gi'
+    systemctl enable sddm mnt-theater.mount
+    systemctl poweroff

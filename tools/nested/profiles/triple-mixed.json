@@ -1,0 +1,29 @@
+{
+  "description": "Three displays with degraded identity on two of them. WL-1 fails its EDID checksum (the KVM-switch case) and WL-2 has no EDID at all (the virtual-output case); both must fall back to connector-name matching without disturbing WL-0.",
+  "outputs": [
+    {
+      "connector": "WL-0",
+      "pnp_id": "DEL",
+      "model": "DELL U3419W",
+      "serial": "1JYP5T2",
+      "product_code": 16646,
+      "serial_number": 809784129,
+      "modes": ["3440x1440"]
+    },
+    {
+      "connector": "WL-1",
+      "pnp_id": "SAM",
+      "model": "Odyssey G7",
+      "serial": "HCLW401234",
+      "product_code": 28001,
+      "serial_number": 1145324612,
+      "corrupt": "checksum",
+      "modes": ["2560x1440"]
+    },
+    {
+      "connector": "WL-2",
+      "edid": false,
+      "modes": ["1920x1080"]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "description": "One display. theater-mode should stay inert: there is no other screen to dim.",
+  "outputs": [
+    {
+      "connector": "WL-0",
+      "pnp_id": "DEL",
+      "model": "DELL S2721QS",
+      "serial": "4QCPZY3",
+      "product_code": 16700,
+      "serial_number": 875770417,
+      "modes": ["3840x2160", "1920x1080"]
+    }
+  ]
+}

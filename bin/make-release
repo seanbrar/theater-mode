@@ -70,7 +70,7 @@ fi
 # Excluding pyproject.toml is functional: bin/theater-mode{,d} use its presence to detect
 # a source checkout. Development scripts under bin/ are enumerated individually because
 # Git :(exclude) pathspecs match exact file paths, not name prefixes.
-DEV_ONLY=(tests .github bin/check bin/check-abi-floor bin/make-release get.sh
+DEV_ONLY=(tests tools .github bin/check bin/check-abi-floor bin/make-release get.sh
           pyproject.toml CONTRIBUTING.md .gitignore .gitattributes distrobox.ini)
 EXCLUDE=()
 for path in "${DEV_ONLY[@]}"; do EXCLUDE+=(":(exclude)$path"); done

@@ -1,0 +1,23 @@
+{
+  "description": "Two well-behaved displays from different vendors. The default profile: exercises full make:model:serial matching on both outputs.",
+  "outputs": [
+    {
+      "connector": "WL-0",
+      "pnp_id": "DEL",
+      "model": "DELL U3419W",
+      "serial": "1JYP5T2",
+      "product_code": 16646,
+      "serial_number": 809784129,
+      "modes": ["3440x1440", "1920x1080"]
+    },
+    {
+      "connector": "WL-1",
+      "pnp_id": "GSM",
+      "model": "LG ULTRAGEAR",
+      "serial": "104NTQK9K811",
+      "product_code": 23122,
+      "serial_number": 16843009,
+      "modes": ["2560x1440", "1920x1080"]
+    }
+  ]
+}

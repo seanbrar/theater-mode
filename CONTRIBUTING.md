@@ -28,6 +28,9 @@ The first command creates the environment once. Run the second from the reposito
 every complete check. The container is named `theater-mode-dev`; its tools are not
 exported into the host's `PATH`.
 
+A separate container manifest at `tools/vm/distrobox.ini` defines `theater-mode-vm`,
+used for optional pre-release Arch VM testing (see `tools/vm/README.md`).
+
 The container shares your real home directory. This is useful for live testing, but it
 also means that running `./install.sh` inside it installs into your real `~/.local` and can
 restart your host's user service. For an isolated installer test, redirect `HOME`:
@@ -114,8 +117,47 @@ theater-mode status
 journalctl --user -u theater-mode.service -f
 ```
 
-To exercise an effect without launching a game, use an output name printed by
-`theater-mode outputs`:
+### Testing and verification ladder
+
+Testing proceeds in tiers, from fast unit tests to full system verification:
+
+1. **Unit and static checks** (fast iteration, ~1-15s):
+   ```bash
+   python3 -m unittest discover -s tests -t . -q
+   ./bin/check   # Authoritative check: builds, ABI floor, ASan/UBSan, linters, tests
+   ```
+
+2. **Integration verification in a nested compositor** (~15s, no persistent host changes):
+   ```bash
+   # Assert clean effect activation across two synthetic displays
+   tools/nested/nested-session.sh --check
+
+   # Test multi-display topologies with corrupted or missing EDID
+   tools/nested/nested-session.sh --check --profile triple-mixed
+   ```
+   See `tools/nested/README.md` for interactive modes, headless CI checks, and profile options.
+
+3. **Visual configuration inspection**:
+   ```bash
+   # Inspect transitions and curves on real monitors against a running dev daemon
+   tools/showcase.py --suite curves
+
+   # Or inspect visual suites inside the isolated nested session
+   tools/nested/nested-session.sh --showcase artwork
+   ```
+   See `tools/README.md` for showcase suites and dry-run options.
+
+4. **Clean OS and pre-release verification**:
+   ```bash
+   # Boot a headless Arch Linux VM, install the checkout, and exercise the installed effect
+   distrobox enter theater-mode-vm -- tools/vm/vm.sh check
+   ```
+   See `tools/vm/README.md` for VM provisioning and interactive graphical run commands.
+
+### Manual CLI simulation
+
+To test an effect on your live desktop without launching a game, use an output name printed
+by `theater-mode outputs`:
 
 ```bash
 theater-mode outputs

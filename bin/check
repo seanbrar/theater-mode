@@ -84,6 +84,15 @@ echo "[check] Verifying the release ABI floor..."
 ./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer
 ./bin/check-abi-floor src/theater_mode/art/theater-art 2.35 "libc.so.6 libm.so.6"
 
+echo "[check] Assembling the release archive..."
+if ! ./bin/make-release \
+    --dimmer-bin src/theater_mode/dimmer/theater-dimmer \
+    --art-bin src/theater_mode/art/theater-art \
+    --outdir "$WORK/release" > "$WORK/make-release.log" 2>&1; then
+    cat "$WORK/make-release.log" >&2
+    die "release archive assembly failed"
+fi
+
 echo "[check] Building the native helpers and unit tests with ASan and UBSan..."
 "$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/art -DTHEATER_ART_VERSION='"test"' \
     tests/art/test_pipeline.c -lm -o "$WORK/test_pipeline" &
@@ -139,7 +148,8 @@ for f in sorted(glob.glob(".github/workflows/*.yml")):
 '
 
 echo "[check] Running ShellCheck..."
-shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor
+shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor \
+    tools/nested/nested-session.sh tools/nested/session-inner.sh tools/vm/vm.sh
 
 echo "[check] Running unit tests..."
 python3 -m unittest discover -s tests -t . -q

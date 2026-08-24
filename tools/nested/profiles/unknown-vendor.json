@@ -1,0 +1,23 @@
+{
+  "description": "Two displays whose PnP codes are absent from hwdata's table, so only the raw three-letter code resolves. Confirms the dual-naming tier in OutputIdentity.match_keys keeps a config portable to a host without /usr/share/hwdata/pnp.ids.",
+  "outputs": [
+    {
+      "connector": "WL-0",
+      "pnp_id": "ZZQ",
+      "model": "Panel One",
+      "serial": "SN00000001",
+      "product_code": 1,
+      "serial_number": 1,
+      "modes": ["1920x1080"]
+    },
+    {
+      "connector": "WL-1",
+      "pnp_id": "ZZR",
+      "model": "Panel Two",
+      "serial": "SN00000002",
+      "product_code": 2,
+      "serial_number": 2,
+      "modes": ["1920x1080"]
+    }
+  ]
+}
