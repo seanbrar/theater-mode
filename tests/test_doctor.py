@@ -16,6 +16,12 @@ from theater_mode.client import main as client_main
 
 HEALTHY_ENV = {"XDG_SESSION_TYPE": "wayland", "XDG_CURRENT_DESKTOP": "KDE"}
 
+KWIN_SUPPORT_INFORMATION = """KWin Support Information:
+
+KWin version: 6.7.4
+Qt Version: 6.11.1
+"""
+
 
 def healthy_run(cmd: list[str]) -> tuple[int, str]:
     """A machine where everything is present and working."""
@@ -29,6 +35,23 @@ def healthy_run(cmd: list[str]) -> tuple[int, str]:
     if prog in ("theater-dimmer", "theater-art"):
         return 0, f"{prog} {__version__}"
     return -1, ""
+
+
+def healthy_kwin(method: str, *_args: object) -> str:
+    """A running KWin that answers the support-information call."""
+    if method == "supportInformation":
+        return KWIN_SUPPORT_INFORMATION
+    raise AssertionError(f"unexpected KWin method: {method}")
+
+
+def kwin_reporting(version: str) -> Callable[..., str]:
+    """A KWin whose support information names `version`."""
+    return lambda *_args: f"KWin version: {version}\n"
+
+
+def silent_kwin(method: str, *_args: object) -> str:
+    """A compositor that does not answer, so the Plasma version falls back to plasmashell."""
+    raise RuntimeError("ServiceUnknown")
 
 
 def healthy_dbus(method: str, *_args: object) -> str:
@@ -54,26 +77,6 @@ def healthy_dbus(method: str, *_args: object) -> str:
 
 
 class DoctorTestCase(unittest.TestCase):
-    def test_plasma_version_check(self) -> None:
-        versions = [
-            ("plasmashell 6.2.0", doctor.OK),
-            ("plasmashell 6.7.4", doctor.OK),
-            ("plasmashell 7.0.0", doctor.OK),
-            ("plasmashell 6.1.5", doctor.FAIL),
-            ("plasmashell 6.0.0", doctor.FAIL),
-            ("plasmashell 5.27.10", doctor.FAIL),
-        ]
-        for output, expected_status in versions:
-            with self.subTest(output=output):
-
-                def custom_run(cmd: list[str]) -> tuple[int, str]:
-                    if Path(cmd[0]).name == "plasmashell":
-                        return 0, output
-                    return healthy_run(cmd)
-
-                checks = self.run_checks(run=custom_run)
-                self.assertEqual(self.status_of(checks, "Plasma version"), expected_status)
-
     """Pins every filesystem probe inside a temporary tree so results never vary by host."""
 
     def setUp(self) -> None:
@@ -124,12 +127,20 @@ class DoctorTestCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
 
     def run_checks(self, **kwargs: object) -> list[doctor.Check]:
-        params: dict = {"call_dbus": healthy_dbus, "env": HEALTHY_ENV, "run": healthy_run}
+        params: dict = {
+            "call_dbus": healthy_dbus,
+            "call_kwin": healthy_kwin,
+            "env": HEALTHY_ENV,
+            "run": healthy_run,
+        }
         params.update(kwargs)
         return doctor.run_checks(**params)
 
     def status_of(self, checks: list[doctor.Check], name: str) -> str:
         return next(c.status for c in checks if c.name == name)
+
+    def detail_of(self, checks: list[doctor.Check], name: str) -> str:
+        return next(c.detail for c in checks if c.name == name)
 
 
 class TestDoctorHealthy(DoctorTestCase):
@@ -151,6 +162,54 @@ class TestDoctorHealthy(DoctorTestCase):
         for entry in payload:
             self.assertEqual(set(entry), {"section", "name", "status", "detail", "hint"})
             self.assertIn(entry["status"], {doctor.OK, doctor.WARN, doctor.FAIL})
+
+
+class TestPlasmaVersion(DoctorTestCase):
+    def test_the_default_probe_queries_kwin(self) -> None:
+        with patch.object(doctor, "_call_kwin_method", side_effect=healthy_kwin) as call_kwin:
+            checks = doctor.run_checks(healthy_dbus, HEALTHY_ENV, healthy_run)
+
+        call_kwin.assert_called_once_with("supportInformation")
+        self.assertEqual(self.detail_of(checks, "Plasma version"), "6.7.4")
+
+    def test_version_gate(self) -> None:
+        versions = [
+            ("6.2.0", doctor.OK),
+            ("6.7.4", doctor.OK),
+            ("7.0.0", doctor.OK),
+            ("6.1.5", doctor.FAIL),
+            ("6.0.0", doctor.FAIL),
+            ("5.27.10", doctor.FAIL),
+        ]
+        for version, expected_status in versions:
+            with self.subTest(version=version):
+                checks = self.run_checks(call_kwin=kwin_reporting(version))
+                self.assertEqual(self.status_of(checks, "Plasma version"), expected_status)
+                self.assertEqual(self.detail_of(checks, "Plasma version"), version)
+
+    def test_the_compositor_answers_without_running_plasmashell(self) -> None:
+        def refuse_plasmashell(cmd: list[str]) -> tuple[int, str]:
+            self.assertNotEqual(Path(cmd[0]).name, "plasmashell")
+            return healthy_run(cmd)
+
+        checks = self.run_checks(run=refuse_plasmashell)
+        self.assertEqual(self.detail_of(checks, "Plasma version"), "6.7.4")
+
+    def test_a_silent_compositor_falls_back_to_plasmashell(self) -> None:
+        checks = self.run_checks(call_kwin=silent_kwin)
+        self.assertEqual(self.status_of(checks, "Plasma version"), doctor.OK)
+        self.assertEqual(self.detail_of(checks, "Plasma version"), "6.7.4")
+
+    def test_support_information_without_a_version_line_falls_back(self) -> None:
+        checks = self.run_checks(call_kwin=lambda *_args: "KWin Support Information:\n")
+        self.assertEqual(self.detail_of(checks, "Plasma version"), "6.7.4")
+
+    def test_no_source_at_all_warns(self) -> None:
+        def no_plasmashell(cmd: list[str]) -> tuple[int, str]:
+            return (-1, "") if Path(cmd[0]).name == "plasmashell" else healthy_run(cmd)
+
+        checks = self.run_checks(call_kwin=silent_kwin, run=no_plasmashell)
+        self.assertEqual(self.status_of(checks, "Plasma version"), doctor.WARN)
 
 
 class TestDoctorFindings(DoctorTestCase):

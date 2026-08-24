@@ -82,12 +82,27 @@ def _run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str]:
 
 
 type Runner = Callable[[list[str]], tuple[int, str]]
+type DBusCall = Callable[..., str]
 
 
-def _probe(call_dbus: Callable[..., str], method: str) -> str | None:
-    """Call a daemon method without letting a dead daemon abort the report."""
+def _call_kwin_method(method_name: str) -> str:
+    """Call an argument-free KWin session-bus method and return its single string reply."""
+    from theater_mode._vendor.jeepney import DBusAddress, new_method_call
+    from theater_mode._vendor.jeepney.io.blocking import open_dbus_connection
+
+    # unwrap_msg is absent from the package's __all__, so it comes from its own module.
+    from theater_mode._vendor.jeepney.wrappers import unwrap_msg
+
+    address = DBusAddress("/KWin", bus_name="org.kde.KWin", interface="org.kde.KWin")
+    with open_dbus_connection(bus="SESSION") as conn:
+        body = unwrap_msg(conn.send_and_get_reply(new_method_call(address, method_name), timeout=5))
+    return str(body[0])
+
+
+def _probe(call: DBusCall, method: str) -> str | None:
+    """Call a D-Bus method without letting an unreachable service abort the report."""
     with contextlib.suppress(Exception, SystemExit), contextlib.redirect_stderr(io.StringIO()):
-        return call_dbus(method)
+        return call(method)
     return None
 
 
@@ -104,7 +119,26 @@ def _os_name() -> str:
         return f"{platform.system()} ({platform.machine()})"
 
 
-def _check_session(env: Mapping[str, str], run: Runner) -> list[Check]:
+_KWIN_VERSION_LINE = re.compile(r"^KWin version: (\S+)", re.MULTILINE)
+
+
+def _plasma_version(run: Runner, call_kwin: DBusCall) -> str:
+    """Return the running Plasma release, or "" when no available source reports it.
+
+    KWin ships version-locked with the Plasma release it belongs to, so its version is
+    the Plasma version.
+    """
+    support = _probe(call_kwin, "supportInformation")
+    if support:
+        match = _KWIN_VERSION_LINE.search(support)
+        if match:
+            return match.group(1)
+
+    rc, out = run(["plasmashell", "--version"])
+    return out.split()[-1] if rc == 0 and out else ""
+
+
+def _check_session(env: Mapping[str, str], run: Runner, call_kwin: DBusCall) -> list[Check]:
     """Evaluate operating system, Wayland session type, desktop environment, and Plasma version."""
     section = "Session"
     checks = [Check(section, "Operating system", OK, _os_name())]
@@ -163,9 +197,8 @@ def _check_session(env: Mapping[str, str], run: Runner) -> list[Check]:
             )
         )
 
-    rc, out = run(["plasmashell", "--version"])
-    if rc == 0 and out:
-        version = out.split()[-1]
+    version = _plasma_version(run, call_kwin)
+    if version:
         match = re.search(r"(\d+)\.(\d+)", version)
         if match:
             major, minor = int(match.group(1)), int(match.group(2))
@@ -179,7 +212,11 @@ def _check_session(env: Mapping[str, str], run: Runner) -> list[Check]:
     else:
         checks.append(
             Check(
-                section, "Plasma version", WARN, "could not determine", "plasmashell was not found."
+                section,
+                "Plasma version",
+                WARN,
+                "could not determine",
+                "KWin could not be queried and plasmashell was not found.",
             )
         )
 
@@ -327,7 +364,7 @@ def _check_service(run: Runner) -> list[Check]:
     return checks
 
 
-def _check_daemon(call_dbus: Callable[..., str]) -> list[Check]:
+def _check_daemon(call_dbus: DBusCall) -> list[Check]:
     """Query daemon D-Bus responsiveness, helper process health, and detector contact."""
     section = "Daemon"
     status = _probe(call_dbus, "Status")
@@ -565,15 +602,17 @@ def _check_artwork() -> list[Check]:
 
 
 def run_checks(
-    call_dbus: Callable[..., str],
+    call_dbus: DBusCall,
     env: Mapping[str, str] | None = None,
     run: Runner | None = None,
+    call_kwin: DBusCall | None = None,
 ) -> list[Check]:
     """Collect session, installation, service, daemon, and artwork diagnostics."""
     env = os.environ if env is None else env
     run = _run if run is None else run
+    call_kwin = _call_kwin_method if call_kwin is None else call_kwin
     return [
-        *_check_session(env, run),
+        *_check_session(env, run, call_kwin),
         *_check_installation(run),
         *_check_service(run),
         *_check_daemon(call_dbus),
