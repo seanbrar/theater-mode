@@ -128,6 +128,37 @@ if current != generate_reference_config():
     sys.exit("config.reference.toml is stale; regenerate it from the schema")
 '
 
+echo "[check] Verifying the vendored jeepney pin..."
+# Dependabot updates only the pin, so a bump fails here until bin/vendor-jeepney
+# rebuilds the in-tree copy.
+python3 - <<'PY'
+import re
+import sys
+from pathlib import Path
+
+
+def read(path, pattern, what):
+    match = re.search(pattern, Path(path).read_text(encoding="utf-8"), re.MULTILINE)
+    if match is None:
+        sys.exit(f"{path}: could not read {what}")
+    return match.group(1)
+
+
+pinned = read(".github/vendor/requirements.txt", r"^jeepney==(\S+)$", "the jeepney pin")
+vendored = read(
+    "src/theater_mode/_vendor/jeepney/__init__.py",
+    r"""^__version__ = ['"](\S+)['"]$""",
+    "the vendored __version__",
+)
+documented = read("src/theater_mode/_vendor/README.md", r"^## jeepney (\S+) ", "the README heading")
+
+if not (pinned == vendored == documented):
+    sys.exit(
+        f"vendored jeepney is {vendored}, the pin says {pinned}, the README says "
+        f"{documented}; run bin/vendor-jeepney"
+    )
+PY
+
 echo "[check] Checking the KWin script and its metadata..."
 node --check kwin/theater-detect/contents/code/main.js
 node tests/test_kwin_detector.js
@@ -148,7 +179,7 @@ for f in sorted(glob.glob(".github/workflows/*.yml")):
 '
 
 echo "[check] Running ShellCheck..."
-shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor \
+shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor bin/vendor-jeepney \
     tools/nested/nested-session.sh tools/nested/session-inner.sh tools/vm/vm.sh
 
 echo "[check] Running unit tests..."

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+#
+# Re-vendor jeepney into src/theater_mode/_vendor/ from a published wheel.
+#
+#   bin/vendor-jeepney [VERSION]
+#
+# VERSION defaults to the pin in .github/vendor/requirements.txt, which is what a
+# Dependabot bump edits. The pin, the vendored __version__, and the heading in
+# src/theater_mode/_vendor/README.md are all rewritten to agree, and bin/check fails
+# while they do not.
+
+set -euo pipefail
+
+REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO"
+
+die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+PIN=".github/vendor/requirements.txt"
+DEST="src/theater_mode/_vendor/jeepney"
+README="src/theater_mode/_vendor/README.md"
+
+case "${1-}" in
+    -h|--help) sed -n '3,11p' "$0"; exit 0 ;;
+esac
+
+VERSION="${1-}"
+if [ -z "$VERSION" ]; then
+    VERSION="$(sed -n 's/^jeepney==\(.*\)$/\1/p' "$PIN")"
+    [ -n "$VERSION" ] || die "no jeepney pin found in $PIN"
+fi
+
+command -v unzip >/dev/null || die "unzip is required"
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+echo "[vendor] Downloading jeepney $VERSION..."
+python3 -m pip download --no-deps --only-binary=:all: --quiet \
+    "jeepney==$VERSION" -d "$WORK/wheel" \
+    || die "could not download jeepney==$VERSION"
+
+WHEEL="$(find "$WORK/wheel" -name '*.whl' -print -quit)"
+[ -n "$WHEEL" ] || die "pip downloaded no wheel"
+unzip -q "$WHEEL" -d "$WORK/unpacked"
+[ -d "$WORK/unpacked/jeepney" ] || die "wheel contains no jeepney package"
+
+# Only the blocking transport is used. Dropping asyncio keeps it out of the daemon
+# import graph.
+rm -f "$WORK/unpacked/jeepney/bindgen.py" \
+      "$WORK/unpacked/jeepney/io/asyncio.py" \
+      "$WORK/unpacked/jeepney/io/threading.py" \
+      "$WORK/unpacked/jeepney/io/trio.py"
+find "$WORK/unpacked/jeepney" -type d \( -name tests -o -name __pycache__ \) -prune -exec rm -rf {} +
+
+# `from jeepney import x` inside io/ resolves to an installed copy rather than this one.
+# Only io/ needs this: every other module already imports relatively.
+sed -i -e 's/^from jeepney\./from ../' -e 's/^from jeepney /from .. /' \
+    "$WORK/unpacked/jeepney/io/"*.py
+
+if grep -rnE '^[[:space:]]*(from|import) jeepney\b' "$WORK/unpacked/jeepney"; then
+    die "absolute jeepney imports remain; extend the rewrite in $0 to cover them"
+fi
+
+LICENSE_SRC="$(find "$WORK/unpacked" -path '*.dist-info*' -name 'LICENSE*' -print -quit)"
+[ -n "$LICENSE_SRC" ] || die "wheel ships no LICENSE"
+
+rm -rf "$DEST"
+mkdir -p "$(dirname "$DEST")"
+cp -r "$WORK/unpacked/jeepney" "$DEST"
+cp "$LICENSE_SRC" "$DEST/LICENSE"
+
+VENDORED="$(sed -n "s/^__version__ = ['\"]\(.*\)['\"]$/\1/p" "$DEST/__init__.py")"
+[ "$VENDORED" = "$VERSION" ] \
+    || die "wheel for $VERSION reports __version__ $VENDORED"
+
+printf 'jeepney==%s\n' "$VERSION" > "$WORK/pin"
+grep -v '^jeepney==' "$PIN" > "$WORK/head" || true
+cat "$WORK/head" "$WORK/pin" > "$PIN"
+sed -i "s/^## jeepney .*(MIT/## jeepney $VERSION (MIT/" "$README"
+
+echo "[vendor] Vendored jeepney $VERSION."
+git -C "$REPO" status --short -- "$DEST" "$PIN" "$README"
+echo "[vendor] Review the diff, then run bin/check."

@@ -224,7 +224,7 @@ units — are described in the README.
 | Tier | Component | Purpose and origin |
 | --- | --- | --- |
 | **Direct Runtime** | Python 3.12+ and its standard library | Daemon runtime, CLI dispatch, configuration parsing, and the updater |
-| **Vendored Runtime** | `jeepney` (MIT), in `src/theater_mode/_vendor/` | D-Bus message construction and transport. Pure Python, so the daemon needs nothing outside CPython; the event loop is this project's own `theater_mode.bus.EventLoop` |
+| **Vendored Runtime** | `jeepney` (MIT), in `src/theater_mode/_vendor/` | D-Bus message construction and transport. Pure Python, so the daemon needs nothing outside CPython; the event loop is this project's own `theater_mode.bus.EventLoop`. Rebuilt by `bin/vendor-jeepney` from the version pinned in `.github/vendor/requirements.txt`. |
 | **Direct Runtime** | glibc (`libc.so.6`) | C and POSIX runtime for both native helpers |
 | **Direct Runtime** | `libwayland-client.so.0` | Wayland protocol transport for `theater-dimmer` |
 | **Direct Runtime** | `libm.so.6` | Linked by both native helpers for the resampler and fade-curve math |
@@ -237,6 +237,7 @@ units — are described in the README.
 | **Check Only** | PyYAML, Node.js, `readelf` from Binutils, ShellCheck, Ruff | Workflow/schema parsing, KWin checks, ABI inspection, shell linting, and Python linting |
 | **Optional** | [`gh`](https://cli.github.com) | Verifying release build provenance in `get.sh`. A `gh` that is missing, unauthenticated, or too old to carry the `attestation` command falls back to checksum verification alone. |
 | **Maintainer Only** | Pillow | Rendering the reference artwork corpus (`tests/generate_reference_corpus.py`). Not needed to run `bin/check`, which compares against committed fixtures. |
+| **Maintainer Only** | `pip`, `unzip` | Downloading and unpacking the jeepney wheel in `bin/vendor-jeepney`. Needed only when the vendored copy is updated. |
 
 The prebuilt helpers target a glibc 2.35 floor, enforced by `bin/check-abi-floor`. Systems
 below that floor build the same sources through `./install.sh --build`, which is why the

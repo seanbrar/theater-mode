@@ -7,7 +7,10 @@ Upstream: https://gitlab.com/takluyver/jeepney
 Vendored so the daemon has no runtime dependency outside CPython. A checkout and a release
 archive resolve this import identically.
 
-Two mechanical changes are applied to upstream. Repeat both when updating.
+`bin/vendor-jeepney` rebuilds this tree from a published wheel and applies both changes
+below. The version it fetches is pinned in `.github/vendor/requirements.txt`, where
+Dependabot proposes updates. `bin/check` fails while that pin, the vendored `__version__`,
+and the heading above disagree, so a bump cannot merge until the tree has been rebuilt.
 
 **Modules removed.** Only the blocking transport is used. Dropped: `io/asyncio.py`,
 `io/trio.py`, `io/threading.py`, `bindgen.py` (a code generator referenced only in

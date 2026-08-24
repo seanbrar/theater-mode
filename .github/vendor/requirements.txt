@@ -1,0 +1,3 @@
+# Tracks upstream jeepney releases for Dependabot.
+# Nothing installs this file; bin/check verifies it matches the vendored tree.
+jeepney==0.9.0

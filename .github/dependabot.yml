@@ -11,3 +11,12 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "tools"
+
+  # Tracks upstream releases for the vendored jeepney tree.
+  # A proposed version bump fails bin/check until bin/vendor-jeepney has been run.
+  - package-ecosystem: "pip"
+    directory: "/.github/vendor"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "core"
