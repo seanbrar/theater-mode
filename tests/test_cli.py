@@ -32,21 +32,21 @@ from theater_mode.effects.dim import DimEffect
 
 
 class TestCLI(unittest.TestCase):
-    def test_daemon_main_exits_nonzero_on_name_lost(self) -> None:
+    def test_daemon_main_exits_nonzero_when_the_name_is_taken(self) -> None:
+        # RequestName answers 3 (DBUS_REQUEST_NAME_REPLY_EXISTS) when another instance owns
+        # the name, which must not be mistaken for the 1 that means primary ownership.
+        reply = MagicMock()
+        reply.body = (3,)
+        conn = MagicMock()
+        conn.send_and_get_reply.return_value = reply
+
         with (
-            patch("gi.repository.Gio.bus_own_name") as mock_bus_own,
-            patch("gi.repository.GLib.MainLoop.run"),
+            patch("theater_mode.bus.open_dbus_connection", return_value=conn),
             patch("theater_mode.cli.logging.basicConfig"),
-            patch("theater_mode.cli.log.error"),
+            patch("theater_mode.bus.log.error"),
         ):
-
-            def trigger_lost(*args, **kwargs):
-                on_name_lost = mock_bus_own.call_args[0][5]
-                on_name_lost()
-
-            mock_bus_own.side_effect = trigger_lost
-            result = daemon_main([])
-            self.assertEqual(result, 1)
+            self.assertEqual(daemon_main([]), 1)
+        conn.close.assert_called_once()
 
     def _run_client(
         self, argv: list[str], response: str | list[str]

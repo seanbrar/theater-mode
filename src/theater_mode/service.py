@@ -12,10 +12,8 @@ from theater_mode.daemon import Daemon
 
 log = logging.getLogger("theater-moded")
 
-VariantFactory = Callable[[str, tuple[Any, ...]], Any]
 
-
-def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., None]:
+def make_handler(daemon: Daemon) -> Callable[..., None]:
     """Create a D-Bus method dispatch closure bound to a Daemon instance."""
     void_methods: dict[str, Callable[..., Any]] = {
         "WindowOpened": daemon.window_opened,
@@ -44,17 +42,17 @@ def make_handler(daemon: Daemon, make_variant: VariantFactory) -> Callable[..., 
         path: str,
         iface: str,
         method: str,
-        params: Any,
+        params: tuple[str, ...] | None,
         invocation: Any,
         *_: object,
     ) -> None:
         try:
-            args = params.unpack() if params is not None else ()
+            args = tuple(params or ())
             if fn := void_methods.get(method):
                 fn(*args)
                 invocation.return_value(None)
             elif fn := string_methods.get(method):
-                invocation.return_value(make_variant("(s)", (fn(*args),)))
+                invocation.return_value(fn(*args))
             else:
                 invocation.return_dbus_error(f"{INTERFACE}.UnknownMethod", method)
         except Exception:

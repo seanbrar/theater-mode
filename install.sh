@@ -253,11 +253,6 @@ check_prerequisites() {
         command -v systemctl >/dev/null || missing+=("systemctl")
     fi
 
-    if command -v python3 >/dev/null; then
-        python3 -c 'import gi; gi.require_version("Gio", "2.0"); gi.require_version("GLib", "2.0")' 2>/dev/null \
-            || missing+=("python3 gobject bindings (python3-gobject / python-gobject)")
-    fi
-
     # A prebuilt dimmer is verified by execution; headers and pkg-config apply only when
     # compiling one here.
     if [ "$NEEDS_DIMMER_BUILD" -eq 1 ] && command -v pkg-config >/dev/null; then

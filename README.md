@@ -208,8 +208,8 @@ theater-mode to watch, so Game Mode itself is not supported.
 
 ## Installing from source
 
-A source install needs Python 3.12 or newer, PyGObject, a C compiler, `make`, `pkg-config`,
-and the libwayland development headers.
+A source install needs Python 3.12 or newer, a C compiler, `make`, `pkg-config`, and the
+libwayland development headers.
 
 ```sh
 git clone https://github.com/seanbrar/theater-mode

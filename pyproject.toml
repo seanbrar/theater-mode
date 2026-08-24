@@ -2,13 +2,14 @@
 line-length = 100
 target-version = "py312"
 required-version = ">=0.16,<0.17"
+# Vendored sources preserve upstream style; see src/theater_mode/_vendor/README.md.
+extend-exclude = ["src/theater_mode/_vendor"]
 
 [tool.ruff.lint]
 # E: pycodestyle errors, F: Pyflakes, W: warnings, I: isort, UP: pyupgrade
 select = ["E", "F", "W", "I", "UP"]
 ignore = [
     "E501",  # Line length handled by formatter
-    "E402",  # Module level imports after gi.require_version()
 ]
 
 [tool.ruff.lint.isort]

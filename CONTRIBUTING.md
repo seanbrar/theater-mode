@@ -60,8 +60,8 @@ that first block with CI when results differ.
 ### Native setup
 
 Install the prerequisites listed above with your distribution's package manager. Common
-package names include `python3-gobject`/`python-gobject`, `python3-yaml`/`python-yaml`,
-`libwayland-dev`/`wayland-devel`, `binutils`, `nodejs`, `shellcheck`, and `ruff`. Then run:
+package names include `python3-yaml`/`python-yaml`, `libwayland-dev`/`wayland-devel`,
+`binutils`, `nodejs`, `shellcheck`, and `ruff`. Then run:
 
 ```bash
 ./bin/check
@@ -224,7 +224,7 @@ units — are described in the README.
 | Tier | Component | Purpose and origin |
 | --- | --- | --- |
 | **Direct Runtime** | Python 3.12+ and its standard library | Daemon runtime, CLI dispatch, configuration parsing, and the updater |
-| **Direct Runtime** | PyGObject (`Gio`, `GLib`, `GLibUnix`) | D-Bus IPC and the asynchronous event loop |
+| **Vendored Runtime** | `jeepney` (MIT), in `src/theater_mode/_vendor/` | D-Bus message construction and transport. Pure Python, so the daemon needs nothing outside CPython; the event loop is this project's own `theater_mode.bus.EventLoop` |
 | **Direct Runtime** | glibc (`libc.so.6`) | C and POSIX runtime for both native helpers |
 | **Direct Runtime** | `libwayland-client.so.0` | Wayland protocol transport for `theater-dimmer` |
 | **Direct Runtime** | `libm.so.6` | Linked by both native helpers for the resampler and fade-curve math |

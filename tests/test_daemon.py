@@ -65,9 +65,11 @@ class TestDaemon(unittest.TestCase):
         self.addCleanup(self.temp_dir.cleanup)
         config_dir = Path(self.temp_dir.name)
 
+        self.scheduler = FakeScheduler()
         self.daemon = Daemon(
             effect=self.mock_effect,
             config=ResolvedConfig(daemon=DaemonConfig(revert_delay=0.0, stage_delay=0.0)),
+            scheduler=self.scheduler,
             dev_config=DevConfig(
                 user_config_override=config_dir / "user.toml",
                 system_config_override=config_dir / "system.toml",

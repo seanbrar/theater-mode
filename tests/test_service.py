@@ -10,23 +10,14 @@ from theater_mode.constants import INTERFACE, INTERFACE_XML, OBJECT_PATH
 from theater_mode.service import make_handler
 
 
-class FakeVariant:
-    def __init__(self, *args: object) -> None:
-        self._args = args
-
-    def unpack(self) -> tuple[object, ...]:
-        return self._args
-
-
 class TestServiceDispatch(unittest.TestCase):
     def setUp(self) -> None:
         self.mock_daemon = MagicMock()
-        self.make_variant = MagicMock(side_effect=lambda fmt, values: (fmt, values))
-        self.handler = make_handler(self.mock_daemon, self.make_variant)
+        self.handler = make_handler(self.mock_daemon)
         self.mock_conn = MagicMock()
         self.mock_invocation = MagicMock()
 
-    def _call(self, method: str, params: FakeVariant | None = None) -> None:
+    def _call(self, method: str, *params: str) -> None:
         self.handler(
             self.mock_conn,
             ":1.42",
@@ -38,19 +29,19 @@ class TestServiceDispatch(unittest.TestCase):
         )
 
     def test_window_lifecycle_methods(self) -> None:
-        self._call("WindowOpened", FakeVariant("win-1", "steam_app_100", "1000", "DP-1", "true"))
+        self._call("WindowOpened", "win-1", "steam_app_100", "1000", "DP-1", "true")
         self.mock_daemon.window_opened.assert_called_once_with(
             "win-1", "steam_app_100", "1000", "DP-1", "true"
         )
         self.mock_invocation.return_value.assert_called_with(None)
 
-        self._call("WindowChanged", FakeVariant("win-1", "DP-2", "true"))
+        self._call("WindowChanged", "win-1", "DP-2", "true")
         self.mock_daemon.window_changed.assert_called_once_with("win-1", "DP-2", "true")
 
-        self._call("WindowClosed", FakeVariant("win-1"))
+        self._call("WindowClosed", "win-1")
         self.mock_daemon.window_closed.assert_called_once_with("win-1")
 
-        self._call("SnapshotBegin", FakeVariant("DP-1,DP-2"))
+        self._call("SnapshotBegin", "DP-1,DP-2")
         self.mock_daemon.snapshot_begin.assert_called_once_with("DP-1,DP-2")
         self._call("SnapshotEnd")
         self.mock_daemon.snapshot_end.assert_called_once()
@@ -69,11 +60,10 @@ class TestServiceDispatch(unittest.TestCase):
         self.mock_daemon.status.return_value = "Active"
         self._call("Status")
         self.mock_daemon.status.assert_called_once()
-        self.make_variant.assert_called_with("(s)", ("Active",))
-        self.mock_invocation.return_value.assert_called_with(("(s)", ("Active",)))
+        self.mock_invocation.return_value.assert_called_with("Active")
 
         self.mock_daemon.simulate.return_value = "Simulated"
-        self._call("Simulate", FakeVariant("1671210", "DP-1"))
+        self._call("Simulate", "1671210", "DP-1")
         self.mock_daemon.simulate.assert_called_once_with("1671210", "DP-1")
 
         self.mock_daemon.clear.return_value = "Cleared"
@@ -93,7 +83,7 @@ class TestServiceDispatch(unittest.TestCase):
         self.mock_daemon.get_diagnostics.assert_called_once()
 
         self.mock_daemon.preview.return_value = "Previewed"
-        self._call("Preview", FakeVariant('{"effect.dimming": 0.5}'))
+        self._call("Preview", '{"effect.dimming": 0.5}')
         self.mock_daemon.preview.assert_called_once_with('{"effect.dimming": 0.5}')
 
         self.mock_daemon.revert_preview.return_value = "Reverted"
@@ -101,7 +91,7 @@ class TestServiceDispatch(unittest.TestCase):
         self.mock_daemon.revert_preview.assert_called_once()
 
         self.mock_daemon.commit.return_value = "Committed"
-        self._call("Commit", FakeVariant('{"effect.dimming": 0.5}'))
+        self._call("Commit", '{"effect.dimming": 0.5}')
         self.mock_daemon.commit.assert_called_once_with('{"effect.dimming": 0.5}')
 
         self.mock_daemon.reload.return_value = "Reloaded"

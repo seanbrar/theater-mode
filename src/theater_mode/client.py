@@ -15,43 +15,34 @@ from theater_mode.config.loader import lookup_spec, split_key_path
 from theater_mode.constants import APP_DATA, BUS_NAME, INTERFACE, OBJECT_PATH
 from theater_mode.utils import plural
 
-_NOT_RUNNING_MARKERS = (
-    "ServiceUnknown",
-    "NameHasNoOwner",
-    "was not provided by any .service files",
+_NOT_RUNNING_ERRORS = frozenset(
+    {
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+    }
 )
 
 
 def _call_dbus_method(method_name: str, *args: Any) -> str:
     """Invoke a D-Bus method on the active theater-mode daemon and return the string response."""
+    from theater_mode._vendor.jeepney import DBusAddress, DBusErrorResponse, new_method_call
+    from theater_mode._vendor.jeepney.io.blocking import open_dbus_connection
+
+    # unwrap_msg is absent from the package's __all__, so it comes from its own module.
+    from theater_mode._vendor.jeepney.wrappers import unwrap_msg
+
+    address = DBusAddress(OBJECT_PATH, bus_name=BUS_NAME, interface=INTERFACE)
     try:
-        import gi
-
-        gi.require_version("Gio", "2.0")
-        gi.require_version("GLib", "2.0")
-        from gi.repository import Gio, GLib
-
-        conn = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        params = None
-        if args:
-            params = GLib.Variant(f"({'s' * len(args)})", tuple(str(a) for a in args))
-
-        result = conn.call_sync(
-            BUS_NAME,
-            OBJECT_PATH,
-            INTERFACE,
-            method_name,
-            params,
-            GLib.VariantType.new("(s)"),
-            Gio.DBusCallFlags.NONE,
-            5000,
-            None,
-        )
-        return result.unpack()[0]
-    except Exception as e:
+        with open_dbus_connection(bus="SESSION") as conn:
+            call = new_method_call(
+                address, method_name, "s" * len(args), tuple(str(a) for a in args)
+            )
+            body = unwrap_msg(conn.send_and_get_reply(call, timeout=5))
+        return str(body[0])
+    except DBusErrorResponse as e:
         # Only an unowned D-Bus name means the service is stopped. Every other error keeps
         # its own text, so a real failure is not disguised as a missing service.
-        if any(marker in str(e) for marker in _NOT_RUNNING_MARKERS):
+        if e.name in _NOT_RUNNING_ERRORS:
             print(
                 "error: the theater-mode background service is not running.\n"
                 "  Start it with: systemctl --user restart theater-mode.service\n"
@@ -62,6 +53,9 @@ def _call_dbus_method(method_name: str, *args: Any) -> str:
             print(
                 f"error: could not reach the theater-mode background service: {e}", file=sys.stderr
             )
+        sys.exit(1)
+    except (OSError, TimeoutError, ValueError) as e:
+        print(f"error: could not reach the theater-mode background service: {e}", file=sys.stderr)
         sys.exit(1)
 
 

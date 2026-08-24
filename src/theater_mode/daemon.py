@@ -41,28 +41,6 @@ class TimerScheduler(Protocol):
         ...
 
 
-class GLibTimerScheduler:
-    """Production timer scheduler using GLib's event loop."""
-
-    def __init__(self) -> None:
-        import gi
-
-        gi.require_version("GLib", "2.0")
-        from gi.repository import GLib
-
-        self._glib = GLib
-
-    def timeout_add(self, delay_ms: int, callback: Callable[[], None]) -> Any:
-        def _wrapper() -> bool:
-            callback()
-            return False
-
-        return self._glib.timeout_add(delay_ms, _wrapper)
-
-    def source_remove(self, tag: Any) -> None:
-        self._glib.source_remove(tag)
-
-
 @dataclass
 class TrackedWindow:
     """Represents a window tracked by the compositor script."""
@@ -89,14 +67,15 @@ class Daemon:
         diagnostics: list[Diagnostic] | None = None,
         dev_config: DevConfig | None = None,
         on_config_changed: Callable[[], None] | None = None,
-        scheduler: TimerScheduler | None = None,
+        *,
+        scheduler: TimerScheduler,
     ) -> None:
         self.effect = effect
         self.config = config or ResolvedConfig()
         self.diagnostics = diagnostics or []
         self.dev_config = dev_config
         self.on_config_changed = on_config_changed
-        self.scheduler: TimerScheduler = scheduler or GLibTimerScheduler()
+        self.scheduler = scheduler
         self.windows: dict[str, TrackedWindow] = {}
         self.active_output: str | None = None
         self._applied_others: list[str] | None = None

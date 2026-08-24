@@ -125,6 +125,7 @@ class TestDaemonUnset(unittest.TestCase):
             effect=MagicMock(),
             config=ResolvedConfig(daemon=DaemonConfig()),
             dev_config=DevConfig(user_config_override=self.path),
+            scheduler=MagicMock(),
         )
 
     def test_unset_removes_a_committed_key_and_reloads(self) -> None:
@@ -168,12 +169,10 @@ class TestDaemonUnset(unittest.TestCase):
         from theater_mode.service import make_handler
 
         invocation = MagicMock()
-        handler = make_handler(self.daemon, lambda _sig, args: args)
-        params = MagicMock()
-        params.unpack.return_value = ('["effect.dimming"]',)
-        handler(None, "s", "/p", "i", "Unset", params, invocation)
+        handler = make_handler(self.daemon)
+        handler(None, "s", "/p", "i", "Unset", ('["effect.dimming"]',), invocation)
         invocation.return_value.assert_called_once()
-        self.assertIn("unset 0 keys", invocation.return_value.call_args[0][0][0])
+        self.assertIn("unset 0 keys", invocation.return_value.call_args[0][0])
 
 
 class TestClientUnsetRouting(unittest.TestCase):
