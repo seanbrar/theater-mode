@@ -539,13 +539,14 @@ def _check_artwork() -> list[Check]:
             )
         )
     else:
+        # Whether Steam has cached anything is the diagnostic; how much is not. Counting a
+        # populated library means walking several thousand directory entries.
         try:
-            entries = sum(1 for _ in found.iterdir())
+            populated = next(found.iterdir(), None) is not None
         except OSError:
-            entries = 0
-        checks.append(
-            Check(section, "Steam library cache", OK, f"{_tilde(found)} ({entries} entries)")
-        )
+            populated = False
+        detail = _tilde(found) if populated else f"{_tilde(found)} (empty)"
+        checks.append(Check(section, "Steam library cache", OK, detail))
 
     probe = ART_CACHE if ART_CACHE.is_dir() else ART_CACHE.parent
     if os.access(probe, os.W_OK):
