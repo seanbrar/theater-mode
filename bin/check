@@ -99,6 +99,17 @@ if ! ./bin/make-release \
     die "release archive assembly failed"
 fi
 
+echo "[check] Verifying the release asset name matches the updater..."
+PYTHONPATH="$REPO_DIR/src" python3 -c '
+import sys
+from pathlib import Path
+from theater_mode import __version__, update
+name = update.release_asset_name(__version__)
+if not (Path(sys.argv[1]) / name).is_file():
+    sys.exit(f"bin/make-release did not produce {name}; an installed theater-mode "
+             "update looks up that exact name and would not find this release")
+' "$WORK/release"
+
 echo "[check] Building the native helpers and unit tests with ASan and UBSan..."
 "$CC_BIN" "${SAN_FLAGS[@]}" -Isrc/theater_mode/art -DTHEATER_ART_VERSION='"test"' \
     tests/art/test_pipeline.c -lm -o "$WORK/test_pipeline" &

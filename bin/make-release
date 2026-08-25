@@ -50,6 +50,9 @@ ART_STAMP="$("$ART" --version 2>/dev/null | awk '{print $2}')" \
     || die "art helper reports $ART_STAMP but this tree is $VERSION; rebuild the helper"
 
 ARCH="$(uname -m)"
+# `theater-mode update` builds this filename from the tag name it fetched and matches a
+# release asset by exact name. An asset named any other way is invisible to every
+# installation that predates the change.
 NAME="theater-mode-v${VERSION}-linux-${ARCH}"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT

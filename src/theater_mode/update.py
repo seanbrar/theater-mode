@@ -92,6 +92,11 @@ def _get(url: str) -> bytes:
         raise UpdateError(f"could not download from GitHub: {exc}") from exc
 
 
+def release_asset_name(version: str) -> str:
+    """Name the release archive built for this machine, as bin/make-release publishes it."""
+    return f"theater-mode-v{version}-linux-{platform.machine()}.tar.gz"
+
+
 def fetch_latest() -> Release:
     """Look up the newest published release and the asset built for this architecture."""
     try:
@@ -104,7 +109,7 @@ def fetch_latest() -> Release:
     if not version:
         raise UpdateError("the latest release has no version tag")
 
-    filename = f"theater-mode-v{version}-linux-{platform.machine()}.tar.gz"
+    filename = release_asset_name(version)
     tarball = checksum = None
     assets = payload.get("assets", [])
     if not isinstance(assets, list):
@@ -187,7 +192,9 @@ def apply(stream=sys.stdout) -> int:
     if not release.tarball_url:
         raise UpdateError(
             f"release {release.version} has no build for {platform.machine()}.\n"
-            "  Install from source instead: ./install.sh --build"
+            "  Install from source instead:\n"
+            f"    git clone https://github.com/{PROJECT_REPO}\n"
+            "    cd theater-mode && ./install.sh --build"
         )
     if not release.checksum_url:
         raise UpdateError(
