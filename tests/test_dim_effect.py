@@ -317,7 +317,8 @@ class TestHelperLifecycle(DimEffectTestCase):
         dead.stdin.write.side_effect = BrokenPipeError("gone")
         self.popen.return_value = dead
         broken_effect = DimEffect(artwork=False)
-        self.assertFalse(broken_effect.apply("DP-1", ["DP-2"], "1245620"))
+        with self.assertLogs("theater-moded", level="ERROR"):
+            self.assertFalse(broken_effect.apply("DP-1", ["DP-2"], "1245620"))
 
     def test_is_running_reports_process_state(self) -> None:
         effect = DimEffect(artwork=False)

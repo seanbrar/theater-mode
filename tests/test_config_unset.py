@@ -144,7 +144,8 @@ class TestDaemonUnset(unittest.TestCase):
         self.assertNotIn("dimming", self.path.read_text())
 
     def test_unknown_key_is_rejected_rather_than_silently_accepted(self) -> None:
-        result = self.daemon.unset('["effect.nonsense"]')
+        with self.assertLogs("theater-moded", level="WARNING"):
+            result = self.daemon.unset('["effect.nonsense"]')
         self.assertTrue(result.startswith("error: no valid keys to unset"))
         self.assertIn("rejected:", result)
 
@@ -156,7 +157,8 @@ class TestDaemonUnset(unittest.TestCase):
 
     def test_mixed_known_and_unknown_keys(self) -> None:
         self.daemon.commit('{"effect.dimming": 0.4}')
-        result = self.daemon.unset('["effect.dimming", "effect.bogus"]')
+        with self.assertLogs("theater-moded", level="WARNING"):
+            result = self.daemon.unset('["effect.dimming", "effect.bogus"]')
         self.assertIn("unset 1 key", result)
         self.assertIn("rejected:", result)
 

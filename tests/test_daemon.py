@@ -167,7 +167,8 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(self.daemon.config.behavior.restore_delay, 3.0)
 
     def test_invalid_keys_are_rejected_not_persisted(self) -> None:
-        result = self.daemon.commit('{"effect.dimming": 99.0, "effect.nonsense": 1}')
+        with self.assertLogs("theater-moded", level="WARNING"):
+            result = self.daemon.commit('{"effect.dimming": 99.0, "effect.nonsense": 1}')
         self.assertTrue(result.startswith("error: no valid settings to commit"))
         self.assertIn("exceeds maximum", result)
         self.assertIn("Unknown configuration key", result)
@@ -276,7 +277,8 @@ class TestDaemon(unittest.TestCase):
 
     def test_commit_stage_rolls_back_on_apply_failure(self) -> None:
         self.mock_effect.apply.return_value = False
-        self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
+        with self.assertLogs("theater-moded", level="WARNING"):
+            self.daemon.window_opened("win-game", "steam_app_1671210", "200", "DP-1", "true")
         self.assertIsNone(self.daemon.active_output)
         self.assertIsNone(self.daemon._applied_others)
 
