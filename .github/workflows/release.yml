@@ -48,7 +48,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            gcc make pkg-config libwayland-dev binutils git ca-certificates tar gzip
+            gcc libc6-dev make pkg-config libwayland-dev binutils git ca-certificates tar gzip
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
