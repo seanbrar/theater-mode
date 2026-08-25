@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import signal
 import subprocess
 import sys
@@ -23,9 +24,10 @@ from theater_mode.constants import STEAM_LIBRARY_CACHES  # noqa: E402
 SUITE_DESCRIPTIONS = {
     "flat": "flat overlays across the useful dimming range",
     "artwork": "artwork rendering at several dimming levels",
+    "compare": "direct A/B toggles between flat overlays and artwork",
     "placement": "flat and artwork surfaces above and below windows",
     "outputs": "move the simulated game across every display",
-    "curves": "all transition curves at a visible duration",
+    "curves": "all transition curves at visible and extreme durations",
     "overrides": "different settings on two secondary displays (3+ displays)",
 }
 
@@ -141,6 +143,21 @@ def detect_appid() -> str | None:
     return min(candidates, key=int) if candidates else None
 
 
+def game_title_for_appid(appid: str) -> str | None:
+    """Return the game's name from its Steam appmanifest, or None if unavailable."""
+    for cache in STEAM_LIBRARY_CACHES:
+        # Each cache is <steam root>/appcache/librarycache.
+        manifest = cache.parent.parent / "steamapps" / f"appmanifest_{appid}.acf"
+        if manifest.is_file():
+            try:
+                match = re.search(r'"name"\s+"([^"]+)"', manifest.read_text(errors="ignore"))
+                if match:
+                    return match.group(1)
+            except OSError:
+                pass
+    return None
+
+
 def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
     """Build the visual cases supported by the active display topology."""
     secondary = [output for output in outputs if output != game_output]
@@ -175,6 +192,20 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
             )
             for dimming in (0.35, 0.65, 0.85)
         ],
+        "compare": [
+            step(
+                f"{'Artwork' if art else 'Flat overlay'} at {dimming:.0%} dimming",
+                **{
+                    "effect.art": art,
+                    "effect.placement": "over_windows",
+                    "effect.dimming": dimming,
+                    "transition.duration": 0.5,
+                    "transition.curve": "sine",
+                },
+            )
+            for dimming in (0.85, 0.5)
+            for art in (False, True)
+        ],
         "placement": [
             step(
                 f"{placement}, {'artwork' if art else 'flat'}",
@@ -203,18 +234,25 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
         ],
         "curves": [
             Step(
-                f"{curve} fade over 1.5 seconds",
+                f"{curve} fade over {duration}s",
                 {
                     "effect.art": False,
                     "effect.placement": "over_windows",
                     "effect.dimming": 0.85,
-                    "transition.duration": 1.5,
+                    "transition.duration": duration,
                     "transition.curve": curve,
                 },
                 game_output,
                 reset_before=True,
             )
-            for curve in ("sine", "quad", "cubic", "linear")
+            for curve, duration in (
+                ("sine", 1.5),
+                ("quad", 1.5),
+                ("cubic", 1.5),
+                ("linear", 1.5),
+                ("sine", 0.4),
+                ("sine", 3.0),
+            )
         ],
     }
 
@@ -238,25 +276,33 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
     return suites
 
 
-def show_step(index: int, total: int, step: Step, appid: str) -> None:
+def show_step(index: int, total: int, step: Step, appid: str, title: str | None) -> None:
     """Print the state a contributor should inspect."""
     print(f"\n[{index}/{total}] {step.title}")
-    print(f"  simulated AppID {appid} on {step.game_output}")
+    target = f"AppID {appid}" if title is None else f"AppID {appid} ({title})"
+    print(f"  simulated {target} on {step.game_output}")
     for key, value in step.updates.items():
         print(f"  {key} = {json.dumps(value)}")
 
 
-def advance(prompt: str) -> bool:
-    """Wait for the contributor to release the next case.
+def advance(prompt: str) -> str:
+    """Return the navigation action requested by the contributor.
 
-    Returns False when the walk should stop. End of input counts as a stop, so that
+    Returns 'next', 'prev', 'replay', or 'quit'. End of input counts as 'quit', so
     feeding the prompt a fixed number of newlines walks that many cases and exits.
     """
     try:
-        return input(prompt).strip().lower() != "q"
+        command = input(prompt).strip().lower()
+        if command in ("q", "quit"):
+            return "quit"
+        if command in ("p", "prev", "back"):
+            return "prev"
+        if command in ("r", "replay"):
+            return "replay"
+        return "next"
     except EOFError:
         print()
-        return False
+        return "quit"
 
 
 def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) -> int:
@@ -269,11 +315,18 @@ def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) ->
     active_output: str | None = None
     duration = 2.0
     status = 0
+    title = game_title_for_appid(appid) if appid != "0" else None
+    index = 0
+    total = len(steps)
+    replaying = False
     try:
-        for index, case in enumerate(steps, 1):
-            show_step(index, len(steps), case, appid)
+        while 0 <= index < total:
+            case = steps[index]
+            show_step(index + 1, total, case, appid, title)
             if not dry_run:
-                if case.reset_before:
+                # Re-sending identical values animates the helper from a value to itself,
+                # so a replay has to clear first or the screen never moves.
+                if case.reset_before or replaying:
                     call("Clear")
                     time.sleep(duration + 0.1)
                     active_output = None
@@ -283,12 +336,21 @@ def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) ->
                     call("Simulate", appid, case.game_output)
                     active_output = case.game_output
                 duration = float(case.updates.get("transition.duration", duration))
+            replaying = False
 
             if interval is None:
-                if not advance("  Press Enter for the next case, or q to stop: "):
+                action = advance("  [Enter: Next, p: Prev, r: Replay, q: Quit]: ")
+                if action == "quit":
                     break
+                if action == "prev":
+                    index = max(0, index - 1)
+                elif action == "replay":
+                    replaying = True
+                else:
+                    index += 1
             else:
                 time.sleep(interval)
+                index += 1
     except KeyboardInterrupt:
         print("\nStopped.")
         status = 130
