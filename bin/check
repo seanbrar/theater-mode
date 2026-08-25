@@ -4,6 +4,8 @@
 
 set -euo pipefail
 
+SECONDS=0
+
 die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 wait_for_jobs() {
@@ -14,6 +16,9 @@ wait_for_jobs() {
     done
     [ "$failed" -eq 0 ] || die "$label failed"
 }
+
+# Both C test harnesses close with "[<name>] N checks, M failed".
+check_count() { sed -nE 's/^\[[a-z_]+\] ([0-9]+) checks, [0-9]+ failed$/\1/p' "$1"; }
 
 # Report the binary that actually resolved to make host tool shadowing visible.
 need() {
@@ -87,8 +92,8 @@ for binary in src/theater_mode/dimmer/theater-dimmer src/theater_mode/art/theate
 done
 
 echo "[check] Verifying the release ABI floor..."
-./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer
-./bin/check-abi-floor src/theater_mode/art/theater-art 2.35 "libc.so.6 libm.so.6"
+./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer >/dev/null
+./bin/check-abi-floor src/theater_mode/art/theater-art 2.35 "libc.so.6 libm.so.6" >/dev/null
 
 echo "[check] Assembling the release archive..."
 if ! ./bin/make-release \
@@ -126,10 +131,22 @@ dimmer_test_pid=$!
 wait_for_jobs "sanitizer build" "$test_pid" "$art_asan_pid" "$dimmer_test_pid"
 
 echo "[check] Running dimmer and artwork unit tests..."
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
-    "$WORK/test_dimmer_parser"
-ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
-    "$WORK/test_pipeline" tests/fixtures/artwork_reference
+if ! ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+    "$WORK/test_dimmer_parser" > "$WORK/test-dimmer-parser.log" 2>&1; then
+    cat "$WORK/test-dimmer-parser.log" >&2
+    die "dimmer unit tests failed"
+fi
+if ! ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+    "$WORK/test_pipeline" tests/fixtures/artwork_reference > "$WORK/test-pipeline.log" 2>&1; then
+    cat "$WORK/test-pipeline.log" >&2
+    die "artwork unit tests failed"
+fi
+dimmer_checks="$(check_count "$WORK/test-dimmer-parser.log")"
+art_checks="$(check_count "$WORK/test-pipeline.log")"
+[ -n "$dimmer_checks" ] && [ -n "$art_checks" ] \
+    || die "a native unit test log did not end with a check summary"
+printf '[check] Native unit tests passed (dimmer: %s checks; artwork: %s checks).\n' \
+    "$dimmer_checks" "$art_checks"
 
 echo "[check] Running artwork oracle visual verification (instrumented)..."
 ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
@@ -200,10 +217,19 @@ shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor bin/
     tools/nested/nested-session.sh tools/nested/session-inner.sh tools/vm/vm.sh
 
 echo "[check] Running unit tests..."
-python3 -m unittest discover -s tests -t . -q
+if ! python3 -m unittest discover -s tests -t . -q > "$WORK/unittest.log" 2>&1; then
+    cat "$WORK/unittest.log" >&2
+    die "Python unit tests failed"
+fi
+python_summary="$(sed -nE 's/^Ran ([0-9]+ tests?) in (.+)$/\1 in \2/p' "$WORK/unittest.log")"
+[ -n "$python_summary" ] || die "Python unit tests passed without reporting a summary"
+printf '[check] Python unit tests passed (%s).\n' "$python_summary"
+# The log is otherwise discarded on a pass, and a warning is the one thing in it worth
+# seeing.
+grep 'Warning:' "$WORK/unittest.log" >&2 || true
 
 echo "[check] Running Ruff..."
-ruff check .
-ruff format --check .
+ruff check . --quiet
+ruff format --check . --quiet
 
-echo "[check] All checks passed cleanly."
+echo "[check] Passed (${SECONDS}s)."

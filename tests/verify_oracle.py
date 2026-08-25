@@ -74,7 +74,9 @@ def main() -> None:
             else:
                 sys.exit(f"Error: theater-art binary not found at {art_bin}")
 
-    print(f"[oracle] Verifying {len(manifest)} test cases using {art_bin}...")
+    verbose = "-v" in sys.argv or "--verbose" in sys.argv
+    if verbose:
+        print(f"[oracle] Verifying {len(manifest)} test cases using {art_bin}...")
 
     all_passed = True
 
@@ -130,11 +132,12 @@ def main() -> None:
             passed = (avg_mae <= MAX_ALLOWED_AVG_MAE) and (max_delta <= MAX_ALLOWED_PEAK_DELTA)
             status = "OK" if passed else "FAIL"
 
-            print(
-                f"  [{status}] {case_id:<26} -> "
-                f"MAE: R={mae_r:.2f} G={mae_g:.2f} B={mae_b:.2f} (avg={avg_mae:.2f}), "
-                f"max_delta={max_delta} [{info['note']}]"
-            )
+            if verbose or not passed:
+                print(
+                    f"  [{status}] {case_id:<26} -> "
+                    f"MAE: R={mae_r:.2f} G={mae_g:.2f} B={mae_b:.2f} (avg={avg_mae:.2f}), "
+                    f"max_delta={max_delta} [{info['note']}]"
+                )
 
             if not passed:
                 all_passed = False
@@ -148,7 +151,7 @@ def main() -> None:
             "[oracle] Verification failed: output diverged beyond acceptable perceptual bounds."
         )
 
-    print("[oracle] All reference corpus cases passed within perceptual bounds.")
+    print(f"[oracle] Reference corpus passed ({len(manifest)} cases).")
 
 
 if __name__ == "__main__":
