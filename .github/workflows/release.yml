@@ -138,3 +138,6 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
           generate_release_notes: true
+          # GitHub does not infer prerelease status from tag names. Without this flag,
+          # `releases/latest` serves preview builds to `get.sh` and `theater-mode update`.
+          prerelease: ${{ contains(github.ref_name, '-') }}
