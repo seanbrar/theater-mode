@@ -57,7 +57,7 @@ jobs:
 
       - name: Record binary baseline
         run: |
-          ldd --version | head -1
+          ldd --version | sed -n 1p
           pkg-config --modversion wayland-client
 
       - name: Verify tag version
