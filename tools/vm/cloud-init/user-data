@@ -28,7 +28,6 @@ packages:
   - ttf-dejavu
   - noto-fonts
   - python
-  - python-gobject
   - hwdata
   - wayland-utils
   - mesa
@@ -97,6 +96,5 @@ runcmd:
   - |
     set -eu
     install -d -m 0755 /mnt/theater
-    python3 -c 'import gi'
     systemctl enable sddm mnt-theater.mount
     systemctl poweroff
