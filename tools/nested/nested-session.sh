@@ -5,13 +5,14 @@
 # Starts kwin_wayland windowed on the host with N outputs, bind-mounts a synthetic
 # /sys/class/drm matching those outputs, and runs the repository's daemon, detector, and
 # helpers against them on a private D-Bus. Nothing here reads or writes the live session:
-# every XDG directory is redirected into a scratch tree that is removed on exit.
+# every XDG directory is redirected into a scratch tree. A passing run removes that tree.
+# A failing run leaves it behind, and the log paths in its output stay valid.
 #
 # See tools/nested/README.md for what this does and does not cover.
 
 set -euo pipefail
 
-die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+die() { printf '\033[36m[nested]\033[0m \033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 note() { printf '\033[36m[nested]\033[0m %s\n' "$*"; }
 
 TOOLS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +44,7 @@ Usage: tools/nested/nested-session.sh [options]
   --headless         render to a virtual framebuffer instead of windows on your desktop
   --showcase SUITE   inspect a showcase suite in the nested displays
   --timeout SECONDS  startup and effect deadline (default: 15)
-  --keep             leave the scratch tree in place and print its path
+  --keep             keep the scratch tree after a passing run; a failing run keeps it
   -h, --help         show this message
 
 The fake game needs no Steam install: steam_appid_for_window falls back to reading
@@ -141,16 +142,20 @@ remove_run_dir() {
     rm -rf "$RUN_DIR" 2>/dev/null || true
 }
 
-if [ "$KEEP" -eq 1 ]; then
-    trap 'terminate_session; printf "\033[36m[nested]\033[0m scratch tree kept at %s\n" "$RUN_DIR"' EXIT
-else
-    trap 'terminate_session; remove_run_dir' EXIT
-fi
+finish() {
+    terminate_session
+    if [ "$KEEP" -eq 0 ]; then
+        remove_run_dir
+        return 0
+    fi
+    printf '\033[36m[nested]\033[0m scratch tree kept at %s\n' "$RUN_DIR" >&2
+}
+trap finish EXIT
 # Exit through the EXIT trap on an interrupt, so Ctrl-C in interactive mode tears the
 # whole session down rather than orphaning it.
 trap 'exit 130' INT TERM
 
-note "profile: $PROFILE ($(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["description"])' "$PROFILE_PATH"))"
+note "profile: $PROFILE"
 
 # Synthetic sysfs, and the connector list the daemon is expected to report back. The
 # connector prefix has to match the compositor backend about to be started: KWin names
@@ -228,7 +233,10 @@ SESSION_PGID="${SESSION_PGID:-$SESSION_PID}"
 SESSION_RC=0
 wait "$SESSION_PID" || SESSION_RC=$?
 if [ "$SESSION_RC" -ne 0 ]; then
-    note "session failed; last lines of session.log:"
-    tail -20 "$RUN_DIR/session.log" >&2
+    printf '\033[36m[nested]\033[0m \033[31merror:\033[0m session failed (status %s); last lines of session.log:\n' \
+        "$SESSION_RC" >&2
+    tail -20 "$RUN_DIR/session.log" | sed 's/^/  /' >&2
+    # Keep the tree so the log paths printed above still resolve.
+    KEEP=1
     exit "$SESSION_RC"
 fi

@@ -52,7 +52,7 @@ tools/nested/nested-session.sh --check --headless
 # Seed the private daemon with a custom configuration file
 tools/nested/nested-session.sh --check --config /path/to/custom-config.toml
 
-# Retain temporary scratch files and logs for post-mortem debugging
+# Retain the scratch tree and logs after a passing run (a failing run keeps them anyway)
 tools/nested/nested-session.sh --check --keep
 ```
 
@@ -101,6 +101,6 @@ rewrites the selected profile to match.
 | `--game CMD` | *auto* | Command to launch as the fake game (`kwrite`, `kate`, or `konsole`). |
 | `--xwayland` | *off* | Start Xwayland alongside the nested compositor. The harness does not discover its `DISPLAY` or force the fake game onto X11, so this does not by itself verify an X11 or Proton client path. |
 | `--timeout SECONDS` | `15` | Deadline for compositor startup, daemon readiness, and effect activation. |
-| `--keep` | *off* | Preserve the temporary scratch directory and print its path on exit. |
+| `--keep` | *off* | Preserve the temporary scratch directory after a passing run. A failing run preserves it either way and prints its path. |
 
 </details>

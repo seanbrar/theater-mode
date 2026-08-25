@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+die() { printf '\033[36m[nested]\033[0m \033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 note() { printf '\033[36m[nested]\033[0m %s\n' "$*"; }
 
 process_running() {
@@ -17,6 +17,59 @@ process_running() {
     fi
     state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
     [[ "$state" != Z* ]]
+}
+
+tail_log() {
+    local file=$1 label=$2
+    if [ ! -s "$file" ]; then
+        printf '\033[36m[nested]\033[0m %s log is empty (%s)\n' "$label" "$file" >&2
+        return 0
+    fi
+    printf '\033[36m[nested]\033[0m last lines of %s log (%s):\n' "$label" "$file" >&2
+    tail -15 "$file" | sed 's/^/  /' >&2
+}
+
+summarize_status() {
+    local file=$1
+    if [ ! -s "$file" ]; then
+        printf '\033[36m[nested]\033[0m last status unavailable\n' >&2
+        return 0
+    fi
+    python3 - "$file" <<'PY' >&2
+import json
+import sys
+
+try:
+    status = json.loads(open(sys.argv[1], encoding="utf-8").read())
+except (OSError, json.JSONDecodeError) as error:
+    print(f"\033[36m[nested]\033[0m last status unavailable: {error}")
+    sys.exit()
+games = status.get("games") or []
+if games:
+    tracked = ", ".join(
+        f"AppID {game.get('appid')} on {game.get('output') or 'unknown'}"
+        f" ({'fullscreen' if game.get('fullscreen') else 'not fullscreen'})"
+        for game in games
+    )
+else:
+    tracked = (
+        f"no tracked games ({status.get('tracked_windows', 0)} windows tracked, "
+        f"detector silent for {status.get('detector_silence_seconds', '?')}s)"
+    )
+active = status.get("active_output") or "none"
+dimmed = ", ".join(status.get("affected_outputs") or []) or "none"
+print(f"\033[36m[nested]\033[0m last status: {tracked}; active: {active}; dimmed: {dimmed}")
+PY
+}
+
+fail_with_log() {
+    local message=$1 file=$2 label=$3
+    printf '\033[36m[nested]\033[0m \033[31merror:\033[0m %s\n' "$message" >&2
+    if [ "$#" -ge 4 ]; then
+        summarize_status "$4"
+    fi
+    tail_log "$file" "$label"
+    exit 1
 }
 
 RUN_DIR="${THEATER_NESTED_RUN_DIR:?}"
@@ -71,11 +124,13 @@ deadline=$((SECONDS + TIMEOUT))
 while [ "$SECONDS" -lt "$deadline" ]; do
     [ -S "$XDG_RUNTIME_DIR/$SOCKET" ] && break
     if ! process_running "$KWIN_PID"; then
-        die "nested compositor exited; see $RUN_DIR/kwin.log"
+        fail_with_log "nested compositor exited" "$RUN_DIR/kwin.log" "KWin"
     fi
     sleep 0.25
 done
-[ -S "$XDG_RUNTIME_DIR/$SOCKET" ] || die "nested compositor never came up; see $RUN_DIR/kwin.log"
+if [ ! -S "$XDG_RUNTIME_DIR/$SOCKET" ]; then
+    fail_with_log "nested compositor never came up" "$RUN_DIR/kwin.log" "KWin"
+fi
 sleep 2
 export WAYLAND_DISPLAY="$SOCKET"
 note "nested compositor up on \$WAYLAND_DISPLAY=$SOCKET"
@@ -91,7 +146,7 @@ daemon_ready=0
 deadline=$((SECONDS + TIMEOUT))
 while [ "$SECONDS" -lt "$deadline" ]; do
     if ! process_running "$DAEMON_PID"; then
-        die "daemon exited; see $RUN_DIR/daemon.log"
+        fail_with_log "daemon exited" "$RUN_DIR/daemon.log" "daemon"
     fi
     remaining=$((deadline - SECONDS))
     if PYTHONPATH=src timeout --foreground "$remaining" \
@@ -102,13 +157,16 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     [ "$SECONDS" -lt "$deadline" ] || break
     sleep 0.25
 done
-[ "$daemon_ready" -eq 1 ] || die "daemon did not become ready; see $RUN_DIR/daemon.log"
+if [ "$daemon_ready" -ne 1 ]; then
+    fail_with_log "daemon did not become ready" "$RUN_DIR/daemon.log" "daemon"
+fi
 
-note "daemon sees:"
-PYTHONPATH=src ./bin/theater-mode outputs | sed 's/^/    /'
+if [ "$MODE" = interactive ] && [ -z "$SHOWCASE" ]; then
+    note "daemon sees:"
+    PYTHONPATH=src ./bin/theater-mode outputs | sed 's/^/    /'
+fi
 
 if [ -n "$SHOWCASE" ]; then
-    note "starting showcase suite: $SHOWCASE"
     PYTHONPATH=src "$REPO_DIR/tools/showcase.py" --suite "$SHOWCASE" --appid "$APPID"
     exit 0
 fi
@@ -143,10 +201,10 @@ effect_ready=0
 deadline=$((SECONDS + TIMEOUT))
 while [ "$SECONDS" -lt "$deadline" ]; do
     if ! process_running "$DAEMON_PID"; then
-        die "daemon exited during effect activation; see $RUN_DIR/daemon.log"
+        fail_with_log "daemon exited during effect activation" "$RUN_DIR/daemon.log" "daemon"
     fi
     if ! process_running "$GAME_PID"; then
-        die "game window exited during effect activation; see $RUN_DIR/game.log"
+        fail_with_log "game window exited during effect activation" "$RUN_DIR/game.log" "game"
     fi
     remaining=$((deadline - SECONDS))
     if PYTHONPATH=src timeout --foreground "$remaining" \
@@ -165,17 +223,20 @@ PY
     [ "$SECONDS" -lt "$deadline" ] || break
     sleep 0.25
 done
-[ "$effect_ready" -eq 1 ] || die "effect did not activate within ${TIMEOUT}s"
-
-note "status:"
-sed 's/^/    /' "$RUN_DIR/status.json"
+if [ "$effect_ready" -ne 1 ]; then
+    fail_with_log \
+        "effect did not activate within ${TIMEOUT}s" \
+        "$RUN_DIR/daemon.log" \
+        "daemon" \
+        "$RUN_DIR/status.json"
+fi
 
 python3 - "$RUN_DIR/status.json" "$CONNECTORS" <<'PY'
 import json
 import sys
 
 status = json.loads(open(sys.argv[1], encoding="utf-8").read())
-expected = sorted(sys.argv[2].split("\n"))
+expected = sorted(sys.argv[2].splitlines())
 failures = []
 
 if sorted(status["outputs"]) != expected:
@@ -198,10 +259,18 @@ elif status["affected_outputs"]:
     failures.append(f"single-output profile dimmed {status['affected_outputs']}")
 
 if failures:
-    print("\n".join(f"\033[31mFAIL\033[0m {line}" for line in failures))
+    prefix = "\033[36m[nested]\033[0m \033[31merror:\033[0m"
+    print("\n".join(f"{prefix} {line}" for line in failures), file=sys.stderr)
+    print(
+        f"\033[36m[nested]\033[0m status payload kept at {sys.argv[1]}",
+        file=sys.stderr,
+    )
     sys.exit(1)
 if len(expected) == 1:
-    print("\033[32mPASS\033[0m effect correctly remained inert on one display")
+    print("\033[36m[nested]\033[0m \033[32mPassed:\033[0m effect remained inert on one display")
 else:
-    print("\033[32mPASS\033[0m effect applied correctly")
+    print(
+        f"\033[36m[nested]\033[0m \033[32mPassed:\033[0m "
+        f"effect applied (active: {active}; dimmed: {', '.join(affected)})"
+    )
 PY
