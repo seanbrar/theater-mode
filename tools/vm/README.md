@@ -11,7 +11,7 @@ Use this before a release to verify glibc ABI compatibility, SDDM autologin, and
 ```sh
 distrobox enter theater-mode-vm -- tools/vm/vm.sh check
 ```
-*Boots the cached golden image headless, runs `install.sh`, tests the effect across 2 virtual displays, and asserts `theater-mode doctor` exits clean.*
+*Boots the cached golden image headless, runs `install.sh`, tests the effect across 2 virtual displays, and asserts `theater-mode doctor` exits clean (about 15s).*
 
 For interactive graphical testing in a QEMU window:
 ```sh

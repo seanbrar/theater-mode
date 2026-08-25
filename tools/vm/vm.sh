@@ -343,7 +343,7 @@ wait_for_guest() {
             return 0
         fi
         [ "$SECONDS" -lt "$deadline" ] || break
-        sleep 2
+        sleep 0.5
     done
     die "the guest did not present a graphical session within ${CHECK_TIMEOUT}s"
 }
@@ -502,15 +502,16 @@ process_running() {
 }
 
 stop_guest() {
-    local waited=0
+    # A time-based deadline keeps each timeout independent of the poll interval.
+    local deadline
 
     if [ -n "$QEMU_PID" ] && kill -0 "$QEMU_PID" 2>/dev/null; then
         kill "$QEMU_PID" 2>/dev/null || true
     fi
+    deadline=$((SECONDS + 30))
     while [ -n "$QEMU_PID" ] && process_running "$QEMU_PID" \
-        && [ "$waited" -lt 30 ]; do
-        sleep 1
-        waited=$(( waited + 1 ))
+        && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 0.05
     done
     if [ -n "$QEMU_PID" ] && kill -0 "$QEMU_PID" 2>/dev/null; then
         kill -9 "$QEMU_PID" 2>/dev/null || true
@@ -521,11 +522,10 @@ stop_guest() {
     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
         kill "$XVFB_PID" 2>/dev/null || true
     fi
-    waited=0
+    deadline=$((SECONDS + 5))
     while [ -n "$XVFB_PID" ] && process_running "$XVFB_PID" \
-        && [ "$waited" -lt 5 ]; do
-        sleep 1
-        waited=$(( waited + 1 ))
+        && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 0.05
     done
     if [ -n "$XVFB_PID" ] && kill -0 "$XVFB_PID" 2>/dev/null; then
         kill -9 "$XVFB_PID" 2>/dev/null || true
