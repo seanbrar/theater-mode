@@ -81,13 +81,13 @@ ART_VERSION="$(src/theater_mode/art/theater-art --version | awk '{print $2}')"
 
 echo "[check] Verifying the helpers kept their hardening flags..."
 for binary in src/theater_mode/dimmer/theater-dimmer src/theater_mode/art/theater-art; do
-    readelf -h "$binary" | grep -q 'Type:.*DYN' \
+    readelf -h "$binary" | grep 'Type:.*DYN' >/dev/null \
         || die "$binary is not position-independent; -fPIE/-pie did not survive"
-    readelf -d "$binary" | grep -q 'BIND_NOW' \
+    readelf -d "$binary" | grep 'BIND_NOW' >/dev/null \
         || die "$binary was not linked with -z now; LDFLAGS did not survive"
-    readelf --dyn-syms -W "$binary" | grep -qE '__[[:alnum:]_]+_chk@' \
+    readelf --dyn-syms -W "$binary" | grep -E '__[[:alnum:]_]+_chk@' >/dev/null \
         || die "$binary has no fortified libc calls; _FORTIFY_SOURCE did not survive"
-    readelf --dyn-syms -W "$binary" | grep -q '__stack_chk_fail@' \
+    readelf --dyn-syms -W "$binary" | grep '__stack_chk_fail@' >/dev/null \
         || die "$binary has no stack canary checks; stack protection did not survive"
 done
 
@@ -212,10 +212,13 @@ for f in sorted(glob.glob(".github/workflows/*.yml")):
         except yaml.YAMLError as exc:
             sys.exit(f"{f}: {exc}")
 '
+python3 tools/runner/verify-environments.py
 
 echo "[check] Running ShellCheck..."
 shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor bin/vendor-jeepney \
-    tools/nested/nested-session.sh tools/nested/session-inner.sh tools/vm/vm.sh
+    bin/check-ci tools/nested/nested-session.sh tools/nested/session-inner.sh \
+    tools/runner/native-lifecycle.sh tools/runner/release-build.sh tools/runner/release-verify.sh \
+    tools/runner/runner.sh tools/vm/vm.sh
 
 echo "[check] Running unit tests..."
 if ! python3 -m unittest discover -s tests -t . -q > "$WORK/unittest.log" 2>&1; then

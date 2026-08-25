@@ -55,31 +55,13 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Record binary baseline
+      - name: Build and inspect release artifact
         run: |
-          ldd --version | sed -n 1p
-          pkg-config --modversion wayland-client
-
-      - name: Verify tag version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          set -euo pipefail
-          source_version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/theater_mode/__init__.py)
-          tag_version="${GITHUB_REF_NAME#v}"
-          [ "$source_version" = "$tag_version" ] || {
-            echo "::error::tag $GITHUB_REF_NAME does not match __version__ $source_version"
-            exit 1
-          }
-
-      - name: Build and inspect helper binaries
-        run: |
-          make -C src/theater_mode/dimmer
-          ./bin/check-abi-floor src/theater_mode/dimmer/theater-dimmer 2.35
-          make -C src/theater_mode/art
-          ./bin/check-abi-floor src/theater_mode/art/theater-art 2.35 "libc.so.6 libm.so.6"
-
-      - name: Assemble tarball
-        run: ./bin/make-release --dimmer-bin src/theater_mode/dimmer/theater-dimmer --art-bin src/theater_mode/art/theater-art --outdir dist
+          tag=
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          fi
+          tools/runner/release-build.sh dist "$tag"
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -109,37 +91,7 @@ jobs:
           path: dist
 
       - name: Verify archive and install lifecycle
-        run: |
-          set -euo pipefail
-          (cd dist && sha256sum -c ./*.sha256)
-          mkdir -p rel fakehome
-          tar xzf dist/*.tar.gz -C rel
-          root=$(find rel -maxdepth 1 -mindepth 1 -type d)
-
-          for tool in cc gcc make pkg-config; do
-            ! command -v "$tool"
-          done
-
-          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
-            HOME="$PWD/fakehome" "$root/install.sh" --no-service
-          for file in .local/bin/theater-mode \
-                      .local/libexec/theater-mode/theater-moded \
-                      .local/libexec/theater-mode/theater-dimmer \
-                      .local/libexec/theater-mode/theater-art \
-                      .local/share/theater-mode/lib/theater_mode/update.py \
-                      .local/share/kwin/scripts/theater-detect/metadata.json \
-                      .config/systemd/user/theater-mode.service; do
-            [ -e "$PWD/fakehome/$file" ]
-          done
-          "$PWD/fakehome/.local/libexec/theater-mode/theater-dimmer" --version
-          "$PWD/fakehome/.local/libexec/theater-mode/theater-art" --version
-          [ -x "$PWD/fakehome/.local/share/theater-mode/install.sh" ]
-
-          rm -rf rel dist
-          env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
-            HOME="$PWD/fakehome" "$PWD/fakehome/.local/share/theater-mode/install.sh" \
-              --uninstall --no-service --yes
-          [ "$(find fakehome \( -type f -o -type l \) | wc -l)" -eq 0 ]
+        run: bash dist/verify-release dist
 
   publish:
     name: publish release
@@ -182,5 +134,7 @@ jobs:
           exit 1
       - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: dist/*
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
           generate_release_notes: true

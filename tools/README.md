@@ -6,6 +6,7 @@ These tools complement automated unit tests by verifying behavior across real an
 | --- | --- | --- | --- |
 | **`showcase.py`** | *Do visual transitions and curves look right on real displays?* | Effect changes | `tools/showcase.py --suite curves` |
 | **`nested/`** | *Do changes cross KWin, D-Bus, Wayland, and DRM cleanly?* | Integration changes | `tools/nested/nested-session.sh --check` |
+| **`runner/`** | *Does the checkout pass the native CI job under Ubuntu 24.04?* | Pre-push / Pre-release | `bin/check-ci` |
 | **`vm/`** | *Does a clean install work on an independent distribution?* | Pre-release | `distrobox enter theater-mode-vm -- tools/vm/vm.sh check` |
 
 ---
@@ -56,4 +57,5 @@ tools/nested/nested-session.sh --showcase artwork
 | --- | --- | --- |
 | **Physical Displays (`showcase.py`)** | Rendering on real panels and subjective transition quality. | Requires multi-monitor hardware; modifies live session during run. |
 | **Nested Harness (`tools/nested/`)** | Wayland layer-shell setup, DRM connector matching, D-Bus IPC, and configured EDID fault cases in isolation. | Borrows host libc, Plasma build, and session manager; does not exercise real Steam transitions or inspect rendered pixels. |
+| **Ubuntu Runner (`tools/runner/`)** | GCC 13.3 range analysis, ShellCheck 0.9, the native CI lifecycle, and the Ubuntu 22.04-to-24.04 release boundary. | Does not run the Python version matrix, active Wayland display output, GitHub attestation, publication, or SDDM login. |
 | **Arch Guest VM (`tools/vm/`)** | Clean `install.sh` on a foreign distribution, ABI floor against external glibc, SDDM autologin, and systemd units. | Slower to provision; composited in a QEMU window (not an authority for visual aesthetics). |
