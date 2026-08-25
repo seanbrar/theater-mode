@@ -1,38 +1,27 @@
-# tools — developer workflows
+# tools — developer workflows and verification
 
-These tools cover different kinds of evidence. They complement the automated unit tests
-and do not substitute for one another.
+These tools complement automated unit tests by verifying behavior across real and synthetic desktop boundaries.
 
-| Tool | Question | Cadence |
-| --- | --- | --- |
-| `showcase.py` | *Do configuration choices look and transition correctly on real displays?* | Effect changes |
-| `nested/` | *Does a chosen operation cross the real KWin, D-Bus, Wayland, and DRM boundaries correctly?* | Relevant integration changes |
-| `vm/` | *Does a clean install run and apply its effect on another operating system?* | Before a release |
-
-`nested/` and `vm/` both answer unattended and exit non-zero on failure:
-
-```sh
-tools/nested/nested-session.sh --check
-distrobox enter theater-mode-vm -- tools/vm/vm.sh check
-```
+| Tool | Question | Cadence | Quick Command |
+| --- | --- | --- | --- |
+| **`showcase.py`** | *Do visual transitions and curves look right on real displays?* | Effect changes | `tools/showcase.py --suite curves` |
+| **`nested/`** | *Do changes cross KWin, D-Bus, Wayland, and DRM cleanly?* | Integration changes | `tools/nested/nested-session.sh --check` |
+| **`vm/`** | *Does a clean install work on an independent distribution?* | Pre-release | `distrobox enter theater-mode-vm -- tools/vm/vm.sh check` |
 
 ---
 
-## Configuration showcase (`showcase.py`)
+## 1. Visual configuration showcase (`showcase.py`)
 
-`showcase.py` steps through visual configuration scenarios against a running
-daemon. It temporarily applies session preview settings and simulates game focus changes,
-then independently clears the simulation and reverts the preview on exit or interrupt.
-It exits non-zero and reports what remains if either cleanup operation fails.
+`showcase.py` steps through visual configuration scenarios against a running daemon without permanent config changes. It applies temporary session previews, simulates game focus events, and automatically reverts on exit. If either cleanup step fails it says what remains and exits non-zero.
 
 ### Prerequisites
 
-1. A running development daemon (`theater-moded` or `systemctl --user start theater-mode`).
-2. At least two enabled outputs (physical or synthetic).
-3. No active game windows tracked by the daemon (`theater-mode clear`).
+1. A running daemon (`theater-moded` or `systemctl --user start theater-mode`).
+2. At least two enabled displays (physical or synthetic).
+3. No active game windows tracked (`theater-mode clear`).
 4. No active session preview settings (`theater-mode config revert-preview`).
-5. A positive Steam AppID, supplied by `--appid <id>` or inferred from cached Steam
-   artwork. Suites containing artwork also need `library_hero.jpg` cached for that AppID.
+5. A Steam AppID, from `--appid <id>` or inferred from cached artwork. Artwork suites also
+   need `library_hero.jpg` cached for that AppID.
 
 ### Common recipes
 
@@ -40,10 +29,13 @@ It exits non-zero and reports what remains if either cleanup operation fails.
 # List all available showcase suites
 tools/showcase.py --list
 
-# Step through transition curves interactively (advances on Enter)
+# Step through transition curves interactively (Enter: next, p: prev, r: replay, q: quit)
 tools/showcase.py --suite curves
 
-# Auto-advance through artwork scaling every 3 seconds with a specific Steam AppID
+# A/B compare flat dark overlays against ambient hero artwork
+tools/showcase.py --suite compare
+
+# Auto-advance through artwork scaling every 3 seconds for Steam AppID 440 (Team Fortress 2)
 tools/showcase.py --suite artwork --appid 440 --interval 3
 
 # Specify the primary display hosting the simulated game
@@ -52,13 +44,13 @@ tools/showcase.py --suite placement --game-output DP-1
 # Offline topology check (requires no running daemon or physical monitors)
 tools/showcase.py --dry-run --output DP-1 --output DP-2 --suite outputs --interval 0.01
 
-# Inspect artwork in an isolated nested session without touching host monitors
+# Inspect artwork inside an isolated nested compositor without touching host monitors
 tools/nested/nested-session.sh --showcase artwork
 ```
 
 ---
 
-## Scope & verification boundaries
+## 2. Scope & verification boundaries
 
 | Environment | What it verifies | Limitations |
 | --- | --- | --- |

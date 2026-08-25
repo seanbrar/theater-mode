@@ -4,21 +4,6 @@ When you launch a Steam game, theater-mode dims your other monitors and fills th
 the game's Steam artwork. Move the game to another monitor and the effect follows it.
 Close the game and everything returns to normal.
 
-## Will it work on my system?
-
-You need all of these:
-
-- two or more monitors;
-- KDE Plasma 6.2 or newer;
-- a Wayland desktop session; and
-- games launched through Steam.
-
-On Bazzite, use the **KDE edition in Desktop Mode**. The GNOME edition and Game Mode are
-not supported. On SteamOS, switch to **Desktop Mode**; SteamOS versions before 3.8 use an
-older desktop setup that is not supported.
-
-The installer checks your desktop and stops with an explanation if it is not compatible.
-
 ## Install
 
 Open a terminal, paste this command, and press Enter:
@@ -27,18 +12,28 @@ Open a terminal, paste this command, and press Enter:
 curl -fsSL https://raw.githubusercontent.com/seanbrar/theater-mode/main/get.sh | bash
 ```
 
-The installer downloads the latest release, verifies the download, and starts
+The installer verifies compatibility, sets up the background service, and starts
 theater-mode. It installs only for your user account and does not need `sudo` or change
 the operating system.
 
-Now launch a Steam game. The other monitors should fade after its window appears.
+Now launch a Steam game. The other monitors fade after its window appears.
 
-The ready-made download is currently for x86_64 systems, including ordinary desktop PCs,
-Steam Deck, and most Bazzite devices. See [Installing from source](#installing-from-source)
-for other processors.
+The ready-made download is for x86_64 systems, which covers ordinary desktop PCs, the
+Steam Deck, and most Bazzite devices. On another processor, see
+[Installing from source](#installing-from-source).
+
+theater-mode works with:
+- two or more monitors;
+- KDE Plasma 6.2 or newer on a Wayland session (Bazzite KDE, SteamOS 3.8+ Desktop Mode,
+  Fedora KDE, Nobara, and Arch all qualify); and
+- games launched through Steam.
+
+The installer checks your desktop and stops with an explanation if it is not compatible.
+It cannot check where you play, so: on the Steam Deck, theater-mode works in **Desktop
+Mode** and does nothing in Game Mode. The Bazzite GNOME edition is not supported.
 
 <details>
-<summary>Install without piping a script into Bash, or verify a download yourself</summary>
+<summary>Manual download & checksum verification</summary>
 
 Download the archive and checksum from [GitHub Releases](https://github.com/seanbrar/theater-mode/releases), verify the download against its checksum, then extract and install it:
 
@@ -49,10 +44,8 @@ cd theater-mode-v*-linux-x86_64
 ./install.sh
 ```
 
-The checksum is published beside the archive, so on its own it only catches a damaged
-download. Every release is also signed by the workflow that built it. With the
-[GitHub CLI](https://cli.github.com), you can confirm the archive really is the one
-GitHub built from this repository:
+Every release is also signed by the workflow that built it. If you have the
+[GitHub CLI](https://cli.github.com), verify the archive's provenance:
 
 ```sh
 gh attestation verify theater-mode-v*-linux-x86_64.tar.gz \
@@ -60,47 +53,28 @@ gh attestation verify theater-mode-v*-linux-x86_64.tar.gz \
     --signer-workflow seanbrar/theater-mode/.github/workflows/release.yml
 ```
 
-The one-command installer runs this same check whenever `gh` is installed and signed in,
-and stops rather than installing an archive that fails it. Without `gh` it verifies the
-checksum alone. `theater-mode update` also verifies the checksum only, because it cannot
-assume `gh` is present.
+The one-command installer runs this check whenever `gh` is installed and signed in.
+Without `gh`, it verifies the checksum alone.
 
 </details>
-
-## Update or remove it
-
-Update to the newest release:
-
-```sh
-theater-mode update
-```
-
-Remove theater-mode:
-
-```sh
-theater-mode uninstall
-```
-
-Both commands keep your settings. Uninstalling shows exactly what it will remove and asks
-before doing it.
 
 ## Change the appearance
 
 The built-in settings are ready to use. These are the most common changes:
 
 ```sh
-# Make the other monitors a little brighter. 0 is unchanged; 1 is completely black.
+# Make the other monitors a little brighter (0 is unchanged; 1 is pitch black)
 theater-mode config set effect.dimming 0.75
 
-# Keep windows on the other monitors visible, with artwork behind them.
-# Pair this with a lower dimming (such as 0.35) so the artwork stays bright and clear.
+# Keep windows on the other monitors visible, with artwork behind them
+# Pair this with lower dimming (such as 0.35) so artwork stays bright and clear
 theater-mode config set effect.placement behind_windows
 theater-mode config set effect.dimming 0.35
 
-# Use a plain dark screen instead of Steam artwork.
+# Use a plain dark screen instead of Steam artwork
 theater-mode config set effect.art false
 
-# Wait until the game enters fullscreen before activating.
+# Wait until the game enters fullscreen before activating
 theater-mode config set daemon.require_fullscreen true
 ```
 
@@ -116,14 +90,26 @@ its allowed values.
 <details>
 <summary>Use different settings on different monitors</summary>
 
-First, ask theater-mode how it identifies your monitors:
+First, find your monitor names and suggested headings:
 
 ```sh
 theater-mode outputs
 ```
 
-Open `~/.config/theater-mode/config.toml` and copy the suggested heading for the monitor
-you want to change. Add settings below it, for example:
+Set options for a specific monitor using `theater-mode config set`:
+
+```sh
+# Set dimming for a specific monitor by EDID or connector
+theater-mode config set 'outputs."Dell Inc.:DELL S2721QS:4QCPZY3".dimming' 0.50
+
+# Keep a specific secondary monitor bright with windows visible
+theater-mode config set outputs.DP-2.placement behind_windows
+
+# Leave one monitor out of theater mode entirely (never dim, never show artwork)
+theater-mode config set outputs.DP-2.dimming 0
+```
+
+You can also edit `~/.config/theater-mode/config.toml` directly:
 
 ```toml
 [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
@@ -132,30 +118,18 @@ placement = "behind_windows"
 art = false
 ```
 
-The manufacturer, model, and serial number let the setting follow the physical monitor
+The manufacturer, model, and serial number let settings follow the physical monitor
 if you move its cable to another port. If a monitor does not provide that information,
-use the suggested connector heading such as `[outputs.DP-2]` instead.
+use its connector name (such as `DP-2`).
 
 Per-monitor settings can change `placement`, `dimming`, `art`, `duration`, and `curve`.
-
-To leave one monitor out of theater mode entirely, give it `dimming = 0`. That monitor is
-never dimmed and never shows artwork, whatever the other settings say.
 
 </details>
 
 ## If something goes wrong
 
-Start here. This checks everything theater-mode depends on and tells you what to do about
-whatever it finds:
-
-```sh
-theater-mode doctor
-```
-
-It covers your session type and Plasma version, both helper programs, the KWin script and
-whether it is switched on, the background service, your configuration, your displays, and
-the Steam artwork cache. Home directory paths are shortened to `~`, so the output is safe
-to paste into a bug report.
+Not sure which applies? Run `theater-mode doctor`. It checks everything theater-mode
+depends on and tells you what to do about whatever it finds.
 
 **A monitor stays dim after the game closes**
 
@@ -175,6 +149,17 @@ library once and try again. Native and Flatpak Steam are both detected.
 Close your terminal, open a new one, and retry. If it is still missing, run the command using its
 full path: `~/.local/bin/theater-mode doctor`.
 
+**What `theater-mode doctor` checks**
+
+```sh
+theater-mode doctor
+```
+
+Your session type and Plasma version, both helper programs, the KWin script and whether it
+is switched on, the background service, your configuration, your displays, and the Steam
+artwork cache. Home directory paths are shortened to `~`, so the output is safe to paste
+into a bug report.
+
 **I still need help**
 
 Include the output of `theater-mode doctor` when
@@ -187,6 +172,23 @@ journalctl --user -u theater-mode.service -b --no-pager
 
 Unlike `doctor`, that output is not filtered, so glance over it for usernames or paths you
 would rather not share publicly.
+
+## Update or remove it
+
+Update to the newest release:
+
+```sh
+theater-mode update
+```
+
+Remove theater-mode:
+
+```sh
+theater-mode uninstall
+```
+
+Both commands keep your settings. Uninstalling shows exactly what it will remove and asks
+before doing it.
 
 ## How monitor selection works
 
@@ -218,7 +220,7 @@ cd theater-mode
 ```
 
 On an atomic desktop, build the native helpers in Distrobox and run the installer from the
-host. The exact workflow is in [CONTRIBUTING.md](CONTRIBUTING.md#live-plasma-testing).
+host. The exact workflow is in [CONTRIBUTING.md](CONTRIBUTING.md#live-desktop-testing).
 
 ## Contributing
 
