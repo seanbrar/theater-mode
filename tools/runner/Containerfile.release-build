@@ -1,0 +1,6 @@
+FROM docker.io/library/ubuntu:22.04
+
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      gcc libc6-dev make pkg-config libwayland-dev binutils git ca-certificates tar gzip >/dev/null && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*

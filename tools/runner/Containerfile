@@ -1,0 +1,12 @@
+# Canonical Ubuntu 24.04 runner image for local CI verification.
+# Matches the toolchain and dependencies used in .github/workflows/ci.yml.
+FROM docker.io/library/ubuntu:24.04
+
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      build-essential libwayland-dev pkg-config python3 python3-gi python3-yaml \
+      shellcheck nodejs git systemd dbus-user-session curl ca-certificates binutils >/dev/null && \
+    curl -LsSf https://astral.sh/uv/0.12.1/install.sh \
+      | env UV_UNMANAGED_INSTALL=/usr/local/bin sh && \
+    env UV_TOOL_DIR=/opt/uv UV_TOOL_BIN_DIR=/usr/local/bin uv tool install "ruff>=0.16,<0.17" && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*

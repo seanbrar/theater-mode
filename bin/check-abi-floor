@@ -49,8 +49,8 @@ fi
 
 [ "$(readelf -h "$BIN" | sed -n 's/.*Type:[[:space:]]*\([^[:space:]]*\).*/\1/p')" = DYN ] \
     || die "$BIN is not position-independent (PIE)"
-readelf -lW "$BIN" | grep -q 'GNU_RELRO' || die "$BIN has no GNU_RELRO segment"
-readelf -dW "$BIN" | grep -q 'BIND_NOW' || die "$BIN does not use immediate binding"
+readelf -lW "$BIN" | grep 'GNU_RELRO' >/dev/null || die "$BIN has no GNU_RELRO segment"
+readelf -dW "$BIN" | grep 'BIND_NOW' >/dev/null || die "$BIN does not use immediate binding"
 stack_flags=$(readelf -lW "$BIN" | awk '/GNU_STACK/ { print $(NF - 1) }')
 [ -n "$stack_flags" ] || die "$BIN has no GNU_STACK declaration"
 case "$stack_flags" in
