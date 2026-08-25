@@ -44,6 +44,12 @@ need readelf
 need shellcheck
 need ruff
 
+# The source uses Python 3.12's `type` statement syntax. Check the interpreter here so an
+# older version gets the actionable message below instead of failing during test discovery.
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' \
+    || die "python3 is $(python3 -V 2>&1 | cut -d' ' -f2); 3.12 or newer is required. \
+Use the Distrobox setup in CONTRIBUTING.md, or install a newer Python."
+
 echo "[check] Building the Wayland dimmer and artwork helper..."
 make -C src/theater_mode/dimmer clean >/dev/null
 make -C src/theater_mode/art clean >/dev/null
