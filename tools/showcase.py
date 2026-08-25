@@ -28,7 +28,7 @@ SUITE_DESCRIPTIONS = {
     "placement": "flat and artwork surfaces above and below windows",
     "outputs": "move the simulated game across every display",
     "curves": "all transition curves at visible and extreme durations",
-    "overrides": "different settings on two secondary displays (3+ displays)",
+    "overrides": "per-output settings overriding global defaults",
 }
 
 
@@ -268,6 +268,20 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
                     f"outputs.{first}.dimming": 0.4,
                     f"outputs.{second}.art": False,
                     f"outputs.{second}.dimming": 0.9,
+                    "transition.duration": 0.5,
+                },
+            )
+        ]
+    elif secondary:
+        first = secondary[0]
+        suites["overrides"] = [
+            step(
+                f"Per-output override on {first}",
+                **{
+                    "effect.art": False,
+                    "effect.dimming": 0.85,
+                    f"outputs.{first}.art": True,
+                    f"outputs.{first}.dimming": 0.4,
                     "transition.duration": 0.5,
                 },
             )

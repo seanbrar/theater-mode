@@ -100,12 +100,50 @@ class ShowcaseTests(unittest.TestCase):
             with patch.dict(os.environ, {"THEATER_DEV_FORCE_ART_DIR": str(cache)}):
                 self.assertIsNone(showcase.detect_appid())
 
-    def test_overrides_require_two_secondary_outputs(self) -> None:
+    def test_overrides_adapts_to_available_secondary_outputs(self) -> None:
         dual = showcase.build_suites(["DP-1", "DP-2"], "DP-1")
         triple = showcase.build_suites(["DP-1", "DP-2", "DP-3"], "DP-1")
 
-        self.assertNotIn("overrides", dual)
+        self.assertIn("overrides", dual)
+        self.assertEqual(len(dual["overrides"]), 1)
+        self.assertIn("outputs.DP-2.art", dual["overrides"][0].updates)
+        self.assertNotIn("outputs.DP-3.art", dual["overrides"][0].updates)
+
         self.assertIn("overrides", triple)
+        self.assertEqual(len(triple["overrides"]), 1)
+        self.assertIn("outputs.DP-2.art", triple["overrides"][0].updates)
+        self.assertIn("outputs.DP-3.art", triple["overrides"][0].updates)
+
+    def test_dry_run_runs_overrides_on_dual_displays(self) -> None:
+        output = io.StringIO()
+        argv = [
+            str(MODULE_PATH),
+            "--dry-run",
+            "--suite",
+            "overrides",
+            "--output",
+            "DP-1",
+            "--output",
+            "DP-2",
+            "--interval",
+            "0.001",
+        ]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(showcase, "daemon_status") as status,
+            patch.object(showcase, "active_outputs") as active,
+            patch.object(showcase, "detect_appid") as detect_appid,
+            patch.object(showcase, "call") as call,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(showcase.main(), 0)
+
+        status.assert_not_called()
+        active.assert_not_called()
+        detect_appid.assert_not_called()
+        call.assert_not_called()
+        self.assertIn("Per-output override on DP-2", output.getvalue())
+        self.assertIn("outputs.DP-2.art = true", output.getvalue())
 
     def test_end_of_input_stops_the_walk(self) -> None:
         output = io.StringIO()
