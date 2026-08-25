@@ -80,7 +80,12 @@ class ShowcaseTests(unittest.TestCase):
         active.assert_not_called()
         detect_appid.assert_not_called()
         call.assert_not_called()
-        self.assertIn("[2/2] Game on DP-2", output.getvalue())
+        rendered = output.getvalue()
+        self.assertIn("Showcase outputs (dry run): 2 steps; game on DP-1", rendered)
+        self.assertIn("Showcase finished.", rendered)
+        self.assertIn("[2/2] Effect on DP-1 (game on DP-2)", rendered)
+        self.assertNotIn("AppID 0", rendered)
+        self.assertNotIn("\n  game on", rendered)
 
     def test_force_art_directory_participates_in_appid_detection(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -142,8 +147,28 @@ class ShowcaseTests(unittest.TestCase):
         active.assert_not_called()
         detect_appid.assert_not_called()
         call.assert_not_called()
-        self.assertIn("Per-output override on DP-2", output.getvalue())
-        self.assertIn("outputs.DP-2.artwork = true", output.getvalue())
+        rendered = output.getvalue()
+        self.assertIn("Showcase overrides (dry run): 1 step", rendered)
+        self.assertIn("Per-output override on DP-2", rendered)
+        self.assertIn("outputs.DP-2.artwork = true", rendered)
+        self.assertEqual(rendered.count("game on DP-1"), 1)
+
+    def test_all_suite_names_game_output_after_it_moves(self) -> None:
+        steps = [
+            case
+            for suite in showcase.build_suites(["DP-1", "DP-2"], "DP-1").values()
+            for case in suite
+        ]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(showcase.run(steps, "0", 0.001, dry_run=True, suite_name="all"), 0)
+
+        rendered = output.getvalue()
+        self.assertIn("Effect on DP-1 (game on DP-2)", rendered)
+        self.assertIn("sine fade over 1.5s (game on DP-1)", rendered)
+        # Once in the header, once where the walk moves back. Every other case inherits it.
+        self.assertEqual(rendered.count("game on DP-1"), 2)
+        self.assertEqual(rendered.count("game on DP-2"), 1)
 
     def test_end_of_input_stops_the_walk(self) -> None:
         output = io.StringIO()
@@ -166,6 +191,7 @@ class ShowcaseTests(unittest.TestCase):
 
         self.assertIn("[1/2]", output.getvalue())
         self.assertNotIn("[2/2]", output.getvalue())
+        self.assertIn("Showcase stopped.", output.getvalue())
 
     def test_newlines_on_stdin_walk_that_many_cases(self) -> None:
         output = io.StringIO()
@@ -191,19 +217,25 @@ class ShowcaseTests(unittest.TestCase):
 
     def test_interrupt_restores_the_daemon_and_reports_status(self) -> None:
         steps = showcase.build_suites(["DP-1", "DP-2"], "DP-1")["flat"]
+        output = io.StringIO()
         with (
             patch.object(showcase, "call") as call,
             patch.object(showcase.time, "sleep", side_effect=KeyboardInterrupt),
-            redirect_stdout(io.StringIO()),
+            redirect_stdout(output),
         ):
             status = showcase.run(steps, "440", 5.0, dry_run=False)
 
         self.assertEqual(status, 130)
         self.assertEqual(call.call_args_list[-2:], [call_of("Clear"), call_of("RevertPreview")])
+        self.assertIn(
+            "Showcase stopped; restored displays and discarded preview settings.",
+            output.getvalue(),
+        )
 
     def test_cleanup_tolerates_daemon_disconnect(self) -> None:
         steps = showcase.build_suites(["DP-1", "DP-2"], "DP-1")["flat"]
         errors = io.StringIO()
+        output = io.StringIO()
         with (
             patch.object(
                 showcase,
@@ -215,7 +247,7 @@ class ShowcaseTests(unittest.TestCase):
                     RuntimeError("disconnected"),
                 ],
             ),
-            redirect_stdout(io.StringIO()),
+            redirect_stdout(output),
             redirect_stderr(errors),
         ):
             status = showcase.run(steps[:1], "440", 0.001, dry_run=False)
@@ -223,6 +255,8 @@ class ShowcaseTests(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("could not clear", errors.getvalue())
         self.assertIn("could not discard", errors.getvalue())
+        self.assertIn("cleanup was incomplete", errors.getvalue())
+        self.assertNotRegex(output.getvalue(), r"Showcase (finished|stopped)")
 
     def test_call_rejects_errors(self) -> None:
         with patch.object(showcase, "_call_dbus_method", return_value="error: rejected"):
@@ -408,6 +442,14 @@ class ShowcaseTests(unittest.TestCase):
 
         with patch("builtins.input", side_effect=EOFError):
             self.assertEqual(showcase.advance("prompt: "), "quit")
+
+        output = io.StringIO()
+        with (
+            patch("builtins.input", side_effect=["invalid", "n"]),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(showcase.advance("prompt: "), "next")
+            self.assertEqual(output.getvalue(), "")
 
     def test_game_title_for_appid_reads_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

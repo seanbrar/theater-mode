@@ -168,7 +168,7 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
     suites = {
         "flat": [
             step(
-                f"Flat overlay at {dimming:.0%}",
+                f"Flat overlay at {dimming:.0%} dimming",
                 **{
                     "effect.artwork": False,
                     "effect.placement": "over_windows",
@@ -221,7 +221,7 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
         ],
         "outputs": [
             Step(
-                f"Game on {output}; effect on {', '.join(o for o in outputs if o != output)}",
+                f"Effect on {', '.join(o for o in outputs if o != output)}",
                 {
                     "effect.artwork": False,
                     "effect.placement": "over_windows",
@@ -290,11 +290,10 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
     return suites
 
 
-def show_step(index: int, total: int, step: Step, appid: str, title: str | None) -> None:
+def show_step(index: int, total: int, step: Step, show_game_output: bool) -> None:
     """Print the state a contributor should inspect."""
-    print(f"\n[{index}/{total}] {step.title}")
-    target = f"AppID {appid}" if title is None else f"AppID {appid} ({title})"
-    print(f"  simulated {target} on {step.game_output}")
+    game = f" (game on {step.game_output})" if show_game_output else ""
+    print(f"\n[{index}/{total}] {step.title}{game}")
     for key, value in step.updates.items():
         print(f"  {key} = {json.dumps(value)}")
 
@@ -305,21 +304,29 @@ def advance(prompt: str) -> str:
     Returns 'next', 'prev', 'replay', or 'quit'. End of input counts as 'quit', so
     feeding the prompt a fixed number of newlines walks that many cases and exits.
     """
-    try:
-        command = input(prompt).strip().lower()
-        if command in ("q", "quit"):
+    while True:
+        try:
+            command = input(prompt).strip().lower()
+            if command in ("", "n", "next"):
+                return "next"
+            if command in ("p", "prev", "back"):
+                return "prev"
+            if command in ("r", "replay"):
+                return "replay"
+            if command in ("q", "quit"):
+                return "quit"
+        except EOFError:
+            print()
             return "quit"
-        if command in ("p", "prev", "back"):
-            return "prev"
-        if command in ("r", "replay"):
-            return "replay"
-        return "next"
-    except EOFError:
-        print()
-        return "quit"
 
 
-def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) -> int:
+def run(
+    steps: list[Step],
+    appid: str,
+    interval: float | None,
+    dry_run: bool,
+    suite_name: str | None = None,
+) -> int:
     """Apply each case and restore daemon state on exit.
 
     Returns the process exit status. Restoration runs whether the walk finished, was
@@ -329,14 +336,26 @@ def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) ->
     active_output: str | None = None
     duration = 2.0
     status = 0
-    title = game_title_for_appid(appid) if appid != "0" else None
+    title = game_title_for_appid(appid) if not dry_run and appid != "0" else None
     index = 0
     total = len(steps)
     replaying = False
+    completed = False
+    shown_output = steps[0].game_output if steps else None
+    heading = "Showcase" if suite_name is None else f"Showcase {suite_name}"
+    mode_tag = " (dry run)" if dry_run else ""
+    context = [f"{total} {'step' if total == 1 else 'steps'}"]
+    if shown_output is not None:
+        context.append(f"game on {shown_output}")
+    if not dry_run:
+        target = f"AppID {appid}" if title is None else f"AppID {appid} ({title})"
+        context.append(target)
+    print(f"{heading}{mode_tag}: {'; '.join(context)}")
     try:
         while 0 <= index < total:
             case = steps[index]
-            show_step(index + 1, total, case, appid, title)
+            show_step(index + 1, total, case, case.game_output != shown_output)
+            shown_output = case.game_output
             if not dry_run:
                 # Re-sending identical values animates the helper from a value to itself,
                 # so a replay has to clear first or the screen never moves.
@@ -353,7 +372,7 @@ def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) ->
             replaying = False
 
             if interval is None:
-                action = advance("  [Enter: Next, p: Prev, r: Replay, q: Quit]: ")
+                action = advance("  [Enter: next, p: prev, r: replay, q: quit]: ")
                 if action == "quit":
                     break
                 if action == "prev":
@@ -365,31 +384,35 @@ def run(steps: list[Step], appid: str, interval: float | None, dry_run: bool) ->
             else:
                 time.sleep(interval)
                 index += 1
+        completed = index >= total
     except KeyboardInterrupt:
-        print("\nStopped.")
         status = 130
     except RuntimeError as error:
-        print(f"\ntheater-mode: {error}", file=sys.stderr)
+        print(f"\nshowcase.py: {error}", file=sys.stderr)
         status = 1
     finally:
+        cleanup_failed = False
         if changed:
-            cleanup_failed = False
             try:
                 call("Clear")
             except RuntimeError as error:
-                print(f"theater-mode: could not clear the simulation: {error}", file=sys.stderr)
+                print(f"showcase.py: could not clear the simulation: {error}", file=sys.stderr)
                 cleanup_failed = True
             try:
                 call("RevertPreview")
             except RuntimeError as error:
-                print(f"theater-mode: could not discard preview settings: {error}", file=sys.stderr)
+                print(f"showcase.py: could not discard preview settings: {error}", file=sys.stderr)
                 cleanup_failed = True
-            if cleanup_failed:
-                if status == 0:
-                    status = 1
-                print("\nCleanup was incomplete; check the daemon before continuing.")
-            else:
-                print("\nRestored displays and discarded preview settings.")
+        if cleanup_failed:
+            status = 1
+            print(
+                "showcase.py: cleanup was incomplete; check the daemon before continuing",
+                file=sys.stderr,
+            )
+        else:
+            outcome = "finished" if completed else "stopped"
+            restoration = "; restored displays and discarded preview settings" if changed else ""
+            print(f"\nShowcase {outcome}{restoration}.")
     return status
 
 
@@ -433,12 +456,15 @@ def main() -> int:
             if not args.dry_run:
                 status = daemon_status()
         except RuntimeError as err:
-            print(f"theater-mode: {err}", file=sys.stderr)
+            print(f"showcase.py: {err}", file=sys.stderr)
             return 1
     if len(set(outputs)) != len(outputs):
         parser.error("display names must be unique")
     if len(outputs) < 2:
-        parser.error("at least two enabled outputs are required")
+        parser.error(
+            "at least two enabled outputs are required; pass --output twice with "
+            "--dry-run, or run tools/nested/nested-session.sh --showcase all"
+        )
     if args.game_output and args.game_output not in outputs:
         parser.error(f"unknown game output {args.game_output!r}; choose from {', '.join(outputs)}")
     game_output = args.game_output or outputs[0]
@@ -452,7 +478,7 @@ def main() -> int:
                 raise RuntimeError("invalid Status response: games is not a list")
             previews = session_preview_keys()
         except RuntimeError as err:
-            print(f"theater-mode: {err}", file=sys.stderr)
+            print(f"showcase.py: {err}", file=sys.stderr)
             return 1
         if games:
             parser.error(
@@ -478,7 +504,7 @@ def main() -> int:
         if args.suite == "all"
         else suites[args.suite]
     )
-    return run(selected, appid, args.interval, args.dry_run)
+    return run(selected, appid, args.interval, args.dry_run, args.suite)
 
 
 if __name__ == "__main__":
