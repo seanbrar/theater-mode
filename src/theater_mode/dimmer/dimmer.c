@@ -914,7 +914,7 @@ static void handle_command(struct dimmer_app *app, char *line) {
 }
 
 static void read_commands(struct dimmer_app *app, struct command_input *input, int fd) {
-    size_t len = input->len == DISCARDING_LINE ? 0 : input->len;
+    size_t len = input->len < sizeof(input->data) ? input->len : 0;
     ssize_t count = read(fd, input->data + len, sizeof(input->data) - len);
     if (count <= 0) {
         if (!count) app->running = false;
