@@ -38,6 +38,11 @@ jobs:
     timeout-minutes: 15
     # This pins the binary's glibc baseline instead of inheriting ubuntu-latest's.
     container: ubuntu:22.04
+    # A container job runs its steps under sh unless told otherwise, and these use
+    # `set -o pipefail`, which dash rejects on the first line.
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Install build dependencies
         run: |
@@ -88,6 +93,9 @@ jobs:
     runs-on: ubuntu-24.04
     container: ubuntu:24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Install runtime dependencies
         run: |
