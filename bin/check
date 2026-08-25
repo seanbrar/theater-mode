@@ -143,8 +143,9 @@ if ! ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=
 fi
 dimmer_checks="$(check_count "$WORK/test-dimmer-parser.log")"
 art_checks="$(check_count "$WORK/test-pipeline.log")"
-[ -n "$dimmer_checks" ] && [ -n "$art_checks" ] \
-    || die "a native unit test log did not end with a check summary"
+if [ -z "$dimmer_checks" ] || [ -z "$art_checks" ]; then
+    die "a native unit test log did not end with a check summary"
+fi
 printf '[check] Native unit tests passed (dimmer: %s checks; artwork: %s checks).\n' \
     "$dimmer_checks" "$art_checks"
 

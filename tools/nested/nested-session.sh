@@ -54,7 +54,9 @@ USAGE
 }
 
 require_value() {
-    [ $# -ge 2 ] && [ -n "$2" ] || die "$1 requires a value"
+    if [ $# -lt 2 ] || [ -z "$2" ]; then
+        die "$1 requires a value"
+    fi
 }
 
 while [ $# -gt 0 ]; do

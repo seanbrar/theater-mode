@@ -94,8 +94,9 @@ validate_settings() {
     [[ "$CHECK_TIMEOUT" =~ ^[1-9][0-9]*$ ]] \
         || die "THEATER_VM_CHECK_TIMEOUT must be whole seconds"
     if [ -n "$SSH_PORT" ]; then
-        [[ "$SSH_PORT" =~ ^[0-9]+$ ]] && [ "$SSH_PORT" -ge 1024 ] && [ "$SSH_PORT" -le 65535 ] \
-            || die "THEATER_VM_SSH_PORT must be a port from 1024 to 65535"
+        if ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [ "$SSH_PORT" -lt 1024 ] || [ "$SSH_PORT" -gt 65535 ]; then
+            die "THEATER_VM_SSH_PORT must be a port from 1024 to 65535"
+        fi
     fi
 }
 
@@ -167,8 +168,9 @@ cleanup_build() {
 cmd_fetch() {
     prepare_state_dir
     if [ -f "$BASE_IMAGE" ]; then
-        [ -f "$BASE_CHECKSUM" ] && [ -f "$BASE_SOURCE" ] \
-            || die "cached base image lacks verification metadata; remove it and run fetch again"
+        if [ ! -f "$BASE_CHECKSUM" ] || [ ! -f "$BASE_SOURCE" ]; then
+            die "cached base image lacks verification metadata; remove it and run fetch again"
+        fi
         [ "$(cat "$BASE_SOURCE")" = "$BASE_URL" ] \
             || die "cached base came from a different URL; run clean or restore THEATER_VM_BASE_URL"
         verify_base_image "$BASE_IMAGE"
@@ -612,8 +614,9 @@ cmd_inspect() {
     validate_state_dir
     require_image_tools
     [ -f "$BASE_IMAGE" ] || die "no base image; run: tools/vm/vm.sh fetch"
-    [ -f "$BASE_CHECKSUM" ] && [ -f "$BASE_SOURCE" ] \
-        || die "cached base image lacks verification metadata"
+    if [ ! -f "$BASE_CHECKSUM" ] || [ ! -f "$BASE_SOURCE" ]; then
+        die "cached base image lacks verification metadata"
+    fi
     verify_base_image "$BASE_IMAGE"
     note "base source: $(cat "$BASE_SOURCE")"
     note "base sha256: $(awk 'NR == 1 { print $1 }' "$BASE_CHECKSUM")"
