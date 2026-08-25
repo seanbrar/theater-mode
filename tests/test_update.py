@@ -249,6 +249,43 @@ class ApplyGuardTests(unittest.TestCase):
 
         self.assertIn("999.0.0 files are installed", stream.getvalue())
 
+    def test_the_update_banner_is_flushed_before_the_installer_runs(self):
+        """The installer inherits this descriptor and writes to it directly.
+
+        A buffered stream that has not been flushed emits the banner after the installer's
+        own output, which misorders the account of what happened in any redirected log.
+        """
+        order: list[str] = []
+
+        class RecordingStream(io.StringIO):
+            def flush(self) -> None:
+                order.append("flush")
+                super().flush()
+
+        archive = b"archive"
+        checksum = f"{hashlib.sha256(archive).hexdigest()}  release.tar.gz\n".encode()
+        stream = RecordingStream()
+        root = MagicMock(spec=Path)
+        root.is_dir.return_value = True
+        with (
+            patch.object(
+                update,
+                "fetch_latest",
+                return_value=update.Release("999.0.0", "archive", "checksum"),
+            ),
+            patch.object(update, "_get", side_effect=[archive, checksum]),
+            patch("tarfile.open"),
+            patch.object(
+                update, "_run_installer", side_effect=lambda root: order.append("install")
+            ),
+            patch("pathlib.Path.iterdir", return_value=[root]),
+        ):
+            update.apply(stream=stream)
+
+        self.assertIn("Updating theater-mode", stream.getvalue())
+        self.assertIn("flush", order)
+        self.assertLess(order.index("flush"), order.index("install"))
+
 
 if __name__ == "__main__":
     unittest.main()

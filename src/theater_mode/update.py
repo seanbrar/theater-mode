@@ -202,7 +202,9 @@ def apply(stream=sys.stdout) -> int:
             "refusing to install an unverified archive"
         )
 
-    print(f"Updating theater-mode {__version__} -> {release.version}", file=stream)
+    # The installer writes straight to this descriptor. A block-buffered stream, which is
+    # what stdout is whenever it is not a terminal, would otherwise flush this line after it.
+    print(f"Updating theater-mode {__version__} -> {release.version}", file=stream, flush=True)
 
     with tempfile.TemporaryDirectory(prefix="theater-mode-update-") as tmp:
         work = Path(tmp)
