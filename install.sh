@@ -96,7 +96,9 @@ place() {
         had_old=1
     fi
     if ! mv "$stage/new" "$dest"; then
-        [ "$had_old" -eq 1 ] && mv "$stage/old" "$dest" || true
+        if [ "$had_old" -eq 1 ]; then
+            mv "$stage/old" "$dest" || warn "could not restore the previous $dest"
+        fi
         discard "$stage"
         die "could not install $dest"
     fi
