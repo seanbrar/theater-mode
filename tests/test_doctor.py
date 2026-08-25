@@ -370,6 +370,24 @@ class TestKwinScriptDetection(DoctorTestCase):
         self.assertIsNone(doctor._kwin_script_enabled(lambda _c: (-1, "")))
 
 
+class TestKWinScriptNaming(DoctorTestCase):
+    """Pin the hint text to the name System Settings actually shows."""
+
+    def test_hint_names_the_plugin_as_the_kcm_lists_it(self) -> None:
+        repo_root = Path(__file__).resolve().parent.parent
+        metadata = json.loads((repo_root / "kwin" / "theater-detect" / "metadata.json").read_text())
+        plugin_name = metadata["KPlugin"]["Name"]
+
+        checks = doctor._check_installation(lambda _c: (0, "false"))
+        hints = [check.hint for check in checks if check.hint]
+
+        self.assertTrue(
+            any(f"'{plugin_name}'" in hint for hint in hints),
+            f"no hint quotes {plugin_name!r}; renaming the plugin desynchronises doctor "
+            f"from the KWin Scripts list. Hints were: {hints}",
+        )
+
+
 class TestTildeAbbreviation(unittest.TestCase):
     def test_empty_string_is_empty(self) -> None:
         self.assertEqual(doctor._tilde(""), "")

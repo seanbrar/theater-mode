@@ -2,7 +2,7 @@
     "KPlugin": {
         "Id": "theater-detect",
         "Name": "Theater Mode Detector",
-        "Description": "Reports window lifecycle to the theater-mode daemon so it can apply effects to the screens a game is not on",
+        "Description": "Required by theater-mode. Detects when a Steam game opens or moves, so the other monitors can dim.",
         "Icon": "video-display",
         "License": "MIT",
         "Authors": [
