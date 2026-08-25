@@ -170,7 +170,7 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
             step(
                 f"Flat overlay at {dimming:.0%}",
                 **{
-                    "effect.art": False,
+                    "effect.artwork": False,
                     "effect.placement": "over_windows",
                     "effect.dimming": dimming,
                     "transition.duration": 0.5,
@@ -183,7 +183,7 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
             step(
                 f"Artwork at {dimming:.0%} dimming",
                 **{
-                    "effect.art": True,
+                    "effect.artwork": True,
                     "effect.placement": "over_windows",
                     "effect.dimming": dimming,
                     "transition.duration": 0.5,
@@ -194,9 +194,9 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
         ],
         "compare": [
             step(
-                f"{'Artwork' if art else 'Flat overlay'} at {dimming:.0%} dimming",
+                f"{'Artwork' if artwork else 'Flat overlay'} at {dimming:.0%} dimming",
                 **{
-                    "effect.art": art,
+                    "effect.artwork": artwork,
                     "effect.placement": "over_windows",
                     "effect.dimming": dimming,
                     "transition.duration": 0.5,
@@ -204,26 +204,26 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
                 },
             )
             for dimming in (0.85, 0.5)
-            for art in (False, True)
+            for artwork in (False, True)
         ],
         "placement": [
             step(
-                f"{placement}, {'artwork' if art else 'flat'}",
+                f"{placement}, {'artwork' if artwork else 'flat'}",
                 **{
-                    "effect.art": art,
+                    "effect.artwork": artwork,
                     "effect.placement": placement,
                     "effect.dimming": 0.4 if placement == "behind_windows" else 0.8,
                     "transition.duration": 0.5,
                 },
             )
             for placement in ("over_windows", "behind_windows")
-            for art in (False, True)
+            for artwork in (False, True)
         ],
         "outputs": [
             Step(
                 f"Game on {output}; effect on {', '.join(o for o in outputs if o != output)}",
                 {
-                    "effect.art": False,
+                    "effect.artwork": False,
                     "effect.placement": "over_windows",
                     "effect.dimming": 0.8,
                     "transition.duration": 0.5,
@@ -236,7 +236,7 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
             Step(
                 f"{curve} fade over {duration}s",
                 {
-                    "effect.art": False,
+                    "effect.artwork": False,
                     "effect.placement": "over_windows",
                     "effect.dimming": 0.85,
                     "transition.duration": duration,
@@ -262,11 +262,11 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
             step(
                 f"Per-output settings on {first} and {second}",
                 **{
-                    "effect.art": False,
+                    "effect.artwork": False,
                     "effect.dimming": 0.85,
-                    f"outputs.{first}.art": True,
+                    f"outputs.{first}.artwork": True,
                     f"outputs.{first}.dimming": 0.4,
-                    f"outputs.{second}.art": False,
+                    f"outputs.{second}.artwork": False,
                     f"outputs.{second}.dimming": 0.9,
                     "transition.duration": 0.5,
                 },
@@ -278,9 +278,9 @@ def build_suites(outputs: list[str], game_output: str) -> dict[str, list[Step]]:
             step(
                 f"Per-output override on {first}",
                 **{
-                    "effect.art": False,
+                    "effect.artwork": False,
                     "effect.dimming": 0.85,
-                    f"outputs.{first}.art": True,
+                    f"outputs.{first}.artwork": True,
                     f"outputs.{first}.dimming": 0.4,
                     "transition.duration": 0.5,
                 },

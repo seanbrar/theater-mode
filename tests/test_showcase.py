@@ -106,13 +106,13 @@ class ShowcaseTests(unittest.TestCase):
 
         self.assertIn("overrides", dual)
         self.assertEqual(len(dual["overrides"]), 1)
-        self.assertIn("outputs.DP-2.art", dual["overrides"][0].updates)
-        self.assertNotIn("outputs.DP-3.art", dual["overrides"][0].updates)
+        self.assertIn("outputs.DP-2.artwork", dual["overrides"][0].updates)
+        self.assertNotIn("outputs.DP-3.artwork", dual["overrides"][0].updates)
 
         self.assertIn("overrides", triple)
         self.assertEqual(len(triple["overrides"]), 1)
-        self.assertIn("outputs.DP-2.art", triple["overrides"][0].updates)
-        self.assertIn("outputs.DP-3.art", triple["overrides"][0].updates)
+        self.assertIn("outputs.DP-2.artwork", triple["overrides"][0].updates)
+        self.assertIn("outputs.DP-3.artwork", triple["overrides"][0].updates)
 
     def test_dry_run_runs_overrides_on_dual_displays(self) -> None:
         output = io.StringIO()
@@ -143,7 +143,7 @@ class ShowcaseTests(unittest.TestCase):
         detect_appid.assert_not_called()
         call.assert_not_called()
         self.assertIn("Per-output override on DP-2", output.getvalue())
-        self.assertIn("outputs.DP-2.art = true", output.getvalue())
+        self.assertIn("outputs.DP-2.artwork = true", output.getvalue())
 
     def test_end_of_input_stops_the_walk(self) -> None:
         output = io.StringIO()
@@ -289,15 +289,15 @@ class ShowcaseTests(unittest.TestCase):
     def test_session_preview_keys_reads_provenance(self) -> None:
         resolved = {
             "provenance": {
-                "effect.art": {"layer": "builtin"},
+                "effect.artwork": {"layer": "builtin"},
                 "effect.dimming": {"layer": "session"},
-                "outputs.DP-2.art": {"layer": "session"},
+                "outputs.DP-2.artwork": {"layer": "session"},
             }
         }
         with patch.object(showcase, "call", return_value=json.dumps(resolved)):
             self.assertEqual(
                 showcase.session_preview_keys(),
-                ["effect.dimming", "outputs.DP-2.art"],
+                ["effect.dimming", "outputs.DP-2.artwork"],
             )
 
     def test_main_refuses_to_replace_an_existing_session_preview(self) -> None:

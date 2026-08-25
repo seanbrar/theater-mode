@@ -72,7 +72,7 @@ def generate_reference_config() -> str:
         "# dimming = 0.90",
         "#",
         '# [outputs."Dell Inc.:DELL S2721QS"]',
-        "# art = false",
+        "# artwork = false",
         "#",
         "# [outputs.DP-2]",
         "# dimming = 0.50",

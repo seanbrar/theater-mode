@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     )
     from theater_mode.config.provenance import Diagnostic, Layer, Provenance  # noqa: F401
     from theater_mode.config.schema import (  # noqa: F401
-        DaemonConfig,
+        BehaviorConfig,
         EffectConfig,
         OutputOverrideConfig,
         ResolvedConfig,
@@ -36,8 +36,8 @@ if TYPE_CHECKING:
     )
 
 _EXPORT_MODULES: dict[str, str] = {
+    "BehaviorConfig": "schema",
     "ConfigLoader": "loader",
-    "DaemonConfig": "schema",
     "DevConfig": "dev",
     "Diagnostic": "provenance",
     "EffectConfig": "schema",

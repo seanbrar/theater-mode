@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from theater_mode.client import main as client_main
-from theater_mode.config import DaemonConfig, DevConfig, ResolvedConfig
+from theater_mode.config import BehaviorConfig, DevConfig, ResolvedConfig
 from theater_mode.config.writer import remove_toml_keys, unset_user_config
 from theater_mode.daemon import Daemon
 
@@ -75,11 +75,11 @@ class TestRemoveTomlKeys(unittest.TestCase):
         self.assertIn("[outputs.DP-1]", text)
 
     def test_multiple_keys_across_tables(self) -> None:
-        original = '[effect]\ndimming = 0.5\nplacement = "behind_windows"\n\n[daemon]\nrevert_delay = 2.0\n'
-        text, removed = remove_toml_keys(original, {"effect.placement", "daemon.revert_delay"})
-        self.assertEqual(removed, {"effect.placement", "daemon.revert_delay"})
+        original = '[effect]\ndimming = 0.5\nplacement = "behind_windows"\n\n[behavior]\nrestore_delay = 2.0\n'
+        text, removed = remove_toml_keys(original, {"effect.placement", "behavior.restore_delay"})
+        self.assertEqual(removed, {"effect.placement", "behavior.restore_delay"})
         self.assertIn("dimming = 0.5", text)
-        self.assertNotIn("revert_delay", text)
+        self.assertNotIn("restore_delay", text)
 
     def test_malformed_key_path_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -123,7 +123,7 @@ class TestDaemonUnset(unittest.TestCase):
         self.path = Path(self._tmp.name) / "user.toml"
         self.daemon = Daemon(
             effect=MagicMock(),
-            config=ResolvedConfig(daemon=DaemonConfig()),
+            config=ResolvedConfig(behavior=BehaviorConfig()),
             dev_config=DevConfig(user_config_override=self.path),
             scheduler=MagicMock(),
         )
@@ -184,15 +184,17 @@ class TestClientUnsetRouting(unittest.TestCase):
         return code, out.getvalue(), call
 
     def test_sends_key_list_and_reports_the_new_value(self) -> None:
-        resolved = {"effect": {"dimming": 0.75, "art": True}, "provenance": {}, "outputs": {}}
+        resolved = {"effect": {"dimming": 0.75, "artwork": True}, "provenance": {}, "outputs": {}}
         code, out, call = self._run(
-            ["config", "unset", "effect.dimming", "effect.art"],
+            ["config", "unset", "effect.dimming", "effect.artwork"],
             {"Unset": "unset 2 keys", "GetResolved": json.dumps(resolved)},
         )
         self.assertEqual(code, 0)
-        self.assertEqual(call.call_args_list[0][0], ("Unset", '["effect.dimming", "effect.art"]'))
+        self.assertEqual(
+            call.call_args_list[0][0], ("Unset", '["effect.dimming", "effect.artwork"]')
+        )
         self.assertIn("effect.dimming is now 0.75", out)
-        self.assertIn("effect.art is now true", out)
+        self.assertIn("effect.artwork is now true", out)
 
     def test_accepts_several_keys_at_once(self) -> None:
         resolved = {

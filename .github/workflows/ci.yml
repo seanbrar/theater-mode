@@ -51,7 +51,7 @@ jobs:
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
               HOME="$fake" XDG_BIN_HOME="$bin" ./install.sh --no-service
 
-          for file in "$bin/theater-mode" "$bin/theatre-mode" \
+          for file in "$bin/theater-mode" \
                       "$fake/.local/libexec/theater-mode/theater-moded" \
                       "$fake/.local/libexec/theater-mode/theater-dimmer" \
                       "$fake/.local/libexec/theater-mode/theater-art" \
@@ -130,7 +130,7 @@ jobs:
             || fail "upgrade left an unusable theater-art"
           grep -q '^stale$' "$fake/.local/share/theater-mode/lib/theater_mode/__init__.py" \
             && fail "upgrade did not replace the installed package"
-          for file in "$fake/.local/bin/theater-mode" "$fake/.local/bin/theatre-mode" \
+          for file in "$fake/.local/bin/theater-mode" \
                       "$fake/.local/libexec/theater-mode/theater-moded" \
                       "$fake/.local/libexec/theater-mode/theater-art" \
                       "$fake/.local/libexec/theater-mode/theater-dimmer" \

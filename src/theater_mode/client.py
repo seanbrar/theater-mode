@@ -89,7 +89,7 @@ def _format_provenance_table(config_data: dict[str, Any]) -> str:
     ]
     lines += [
         row(f"{section}.{key}", value, "builtin")
-        for section in ("effect", "transition", "daemon")
+        for section in ("effect", "transition", "behavior")
         for key, value in config_data.get(section, {}).items()
     ]
 
@@ -170,7 +170,7 @@ def _format_status(data: dict[str, Any]) -> str:
 
     if dimmed:
         headline = f"theater-mode is dimming {plural(len(dimmed), 'display')}."
-    elif data.get("revert_pending"):
+    elif data.get("restore_pending"):
         headline = "theater-mode is restoring your displays."
     elif games and data.get("require_fullscreen") and data.get("active_output") is None:
         headline = "theater-mode is waiting for the game to enter fullscreen."
@@ -340,7 +340,9 @@ def main(
     )
     out_p.add_argument("--json", action="store_true", help="Output raw JSON")
 
-    subparsers.add_parser("clear", help="Clear all active simulations and restore displays")
+    subparsers.add_parser(
+        "clear", help="Immediately restore displays and clear tracked games or simulations"
+    )
 
     uninstall_p = subparsers.add_parser("uninstall", help="Remove theater-mode from this machine")
     uninstall_p.add_argument(

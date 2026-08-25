@@ -25,7 +25,7 @@ class EffectOptions:
     dimming: float = DEFAULT_DIMMING
     dim_duration: float = DEFAULT_DURATION
     dim_curve: str = DEFAULT_CURVE
-    art: bool = True
+    artwork: bool = True
     resolved_config: ResolvedConfig | None = None
 
     @classmethod
@@ -36,7 +36,7 @@ class EffectOptions:
             dimming=config.effect.dimming,
             dim_duration=config.transition.duration,
             dim_curve=config.transition.curve,
-            art=config.effect.art,
+            artwork=config.effect.artwork,
             resolved_config=config,
         )
 

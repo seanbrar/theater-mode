@@ -91,15 +91,15 @@ class Daemon:
 
     @property
     def require_fullscreen(self) -> bool:
-        return self.config.daemon.require_fullscreen
+        return self.config.behavior.require_fullscreen
 
     @property
-    def revert_delay(self) -> float:
-        return self.config.daemon.revert_delay
+    def restore_delay(self) -> float:
+        return self.config.behavior.restore_delay
 
     @property
-    def stage_delay(self) -> float:
-        return self.config.daemon.stage_delay
+    def follow_delay(self) -> float:
+        return self.config.behavior.follow_delay
 
     def game_windows(self) -> list[TrackedWindow]:
         """Return all active windows identified as games, filtering by fullscreen if configured."""
@@ -116,10 +116,10 @@ class Daemon:
             self._cancel_pending_stage()
             self.effect.cancel_pending()
             if self.active_output is not None and self._pending_revert is None:
-                if self.revert_delay > 0:
-                    log.info("no game windows left; reverting in %.1fs", self.revert_delay)
+                if self.restore_delay > 0:
+                    log.info("no game windows left; reverting in %.1fs", self.restore_delay)
                     self._pending_revert = self.scheduler.timeout_add(
-                        int(self.revert_delay * 1000), self._revert_now
+                        int(self.restore_delay * 1000), self._revert_now
                     )
                 else:
                     self._revert_now()
@@ -140,7 +140,7 @@ class Daemon:
             return
 
         if self.active_output is None:
-            # stage_delay applies only when an active game moves to another output.
+            # follow_delay applies only when an active game moves to another output.
             self._commit_stage(stage.output, stage.appid or "", stage.resource_class)
             return
 
@@ -150,10 +150,10 @@ class Daemon:
             "game appears to have moved from %s to %s; confirming for %.1fs",
             self.active_output,
             stage.output,
-            self.stage_delay,
+            self.follow_delay,
         )
         self._pending_stage = self.scheduler.timeout_add(
-            int(self.stage_delay * 1000), self._confirm_stage
+            int(self.follow_delay * 1000), self._confirm_stage
         )
 
     def _follow_output_changes(self, stage: TrackedWindow) -> None:
@@ -233,7 +233,7 @@ class Daemon:
             return
         self.scheduler.source_remove(self._pending_revert)
         self._pending_revert = None
-        log.info("a game window returned within %.1fs; staying in theater mode", self.revert_delay)
+        log.info("a game window returned within %.1fs; staying in theater mode", self.restore_delay)
 
     def all_outputs(self) -> set[str]:
         """Aggregate known outputs, preferring compositor reports over DRM sysfs fallback."""
@@ -348,8 +348,8 @@ class Daemon:
                 "secondary_outputs": list(self._applied_others or []),
                 "detector_silence_seconds": round(time.monotonic() - self._detector_contact, 1),
                 "active_output": self.active_output,
-                "revert_pending": self._pending_revert is not None,
-                "revert_delay": self.revert_delay,
+                "restore_pending": self._pending_revert is not None,
+                "restore_delay": self.restore_delay,
                 "require_fullscreen": self.require_fullscreen,
                 "tracked_windows": len(self.windows),
                 "games": [

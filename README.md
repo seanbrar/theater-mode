@@ -72,10 +72,10 @@ theater-mode config set effect.placement behind_windows
 theater-mode config set effect.dimming 0.35
 
 # Use a plain dark screen instead of Steam artwork
-theater-mode config set effect.art false
+theater-mode config set effect.artwork false
 
 # Wait until the game enters fullscreen before activating
-theater-mode config set daemon.require_fullscreen true
+theater-mode config set behavior.require_fullscreen true
 ```
 
 Changes take effect immediately. To see every current setting, run:
@@ -115,14 +115,14 @@ You can also edit `~/.config/theater-mode/config.toml` directly:
 [outputs."Dell Inc.:DELL S2721QS:4QCPZY3"]
 dimming = 0.50
 placement = "behind_windows"
-art = false
+artwork = false
 ```
 
 The manufacturer, model, and serial number let settings follow the physical monitor
 if you move its cable to another port. If a monitor does not provide that information,
 use its connector name (such as `DP-2`).
 
-Per-monitor settings can change `placement`, `dimming`, `art`, `duration`, and `curve`.
+Per-monitor settings can change `placement`, `dimming`, `artwork`, `duration`, and `curve`.
 
 </details>
 

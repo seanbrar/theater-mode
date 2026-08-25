@@ -83,13 +83,13 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(args.system_config_override, Path("/tmp/test_sys.toml"))
 
     def test_effects_are_built_from_options(self) -> None:
-        options = EffectOptions(dimming=0.5, dim_duration=9.0, dim_curve="quad", art=False)
+        options = EffectOptions(dimming=0.5, dim_duration=9.0, dim_curve="quad", artwork=False)
 
         effect = DimEffect.create(options)
         self.assertEqual(effect._dimming, 0.5)
         self.assertEqual(effect._duration, 9.0)
         self.assertEqual(effect._curve, "quad")
-        self.assertFalse(effect._art)
+        self.assertFalse(effect._artwork)
 
     def test_client_parse_cli_value(self) -> None:
         self.assertEqual(_parse_cli_value("true"), True)
@@ -100,9 +100,9 @@ class TestCLI(unittest.TestCase):
 
     def test_client_formatting(self) -> None:
         config_data = {
-            "effect": {"mode": "dim", "dimming": 0.85, "art": True},
+            "effect": {"mode": "dim", "dimming": 0.85, "artwork": True},
             "transition": {"duration": 2.0, "curve": "sine"},
-            "daemon": {"revert_delay": 3.0, "stage_delay": 1.5, "require_fullscreen": False},
+            "behavior": {"restore_delay": 3.0, "follow_delay": 1.5, "require_fullscreen": False},
             "outputs": {"DP-1": {"dimming": 0.5}},
             "provenance": {
                 "effect.dimming": {
@@ -145,9 +145,9 @@ class TestCLI(unittest.TestCase):
     def test_provenance_table_shows_toml_booleans(self) -> None:
         table = _format_provenance_table(
             {
-                "effect": {"art": True},
-                "daemon": {"require_fullscreen": False},
-                "outputs": {"DP-1": {"art": False}},
+                "effect": {"artwork": True},
+                "behavior": {"require_fullscreen": False},
+                "outputs": {"DP-1": {"artwork": False}},
                 "provenance": {},
             }
         )
@@ -157,12 +157,14 @@ class TestCLI(unittest.TestCase):
         self.assertIn("false", table)
 
     def test_config_get_prints_toml_booleans(self) -> None:
-        raw = '{"effect": {"art": true}, "daemon": {"require_fullscreen": false}}'
-        result, stdout, _, _ = self._run_client(["config", "get", "effect.art"], raw)
+        raw = '{"effect": {"artwork": true}, "behavior": {"require_fullscreen": false}}'
+        result, stdout, _, _ = self._run_client(["config", "get", "effect.artwork"], raw)
         self.assertEqual(result, 0)
         self.assertEqual(stdout.strip(), "true")
 
-        result, stdout, _, _ = self._run_client(["config", "get", "daemon.require_fullscreen"], raw)
+        result, stdout, _, _ = self._run_client(
+            ["config", "get", "behavior.require_fullscreen"], raw
+        )
         self.assertEqual(result, 0)
         self.assertEqual(stdout.strip(), "false")
 
@@ -282,7 +284,9 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(stdout.strip(), raw_json)
 
     def test_client_main_config_show_and_diagnostics(self) -> None:
-        raw_config = '{"effect": {"mode": "dim", "dimming": 0.85}, "transition": {}, "daemon": {}}'
+        raw_config = (
+            '{"effect": {"mode": "dim", "dimming": 0.85}, "transition": {}, "behavior": {}}'
+        )
         result, stdout, _, _ = self._run_client(["config", "show"], raw_config)
         self.assertEqual(result, 0)
         self.assertIn("Resolved Configuration", stdout)
@@ -332,12 +336,12 @@ class TestCLI(unittest.TestCase):
         for value, expected in (("yes", "true"), ("on", "true"), ("off", "false")):
             with self.subTest(value=value):
                 _, _, _, call_dbus = self._run_client(
-                    ["config", "set", "effect.art", value],
-                    ["committed 1 key", '{"effect": {"art": true}}'],
+                    ["config", "set", "effect.artwork", value],
+                    ["committed 1 key", '{"effect": {"artwork": true}}'],
                 )
                 self.assertEqual(
                     call_dbus.call_args_list[0][0],
-                    ("Commit", f'{{"effect.art": {expected}}}'),
+                    ("Commit", f'{{"effect.artwork": {expected}}}'),
                 )
 
         _, _, _, call_dbus = self._run_client(

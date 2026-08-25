@@ -22,7 +22,6 @@ DIMMER_BIN="$LIBEXEC_DIR/theater-dimmer"
 ART_BIN="$LIBEXEC_DIR/theater-art"
 DAEMON="$LIBEXEC_DIR/theater-moded"
 CLIENT="$BIN_DIR/theater-mode"
-CLIENT_ALIAS="$BIN_DIR/theatre-mode"
 KWIN_SCRIPT="$DATA_DIR/kwin/scripts/theater-detect"
 UNIT="$CONF_DIR/systemd/user/theater-mode.service"
 WANTS_LINK="$CONF_DIR/systemd/user/graphical-session.target.wants/theater-mode.service"
@@ -362,7 +361,6 @@ do_install() {
     chmod +x "$DAEMON"
     place "$REPO/bin/theater-mode" "$CLIENT"
     chmod +x "$CLIENT"
-    ln -sfn "theater-mode" "$CLIENT_ALIAS" && info "$CLIENT_ALIAS -> theater-mode"
     place "$REPO/src/theater_mode" "$APP_DATA/lib/theater_mode"
     prune_package_copy
     place "$REPO/kwin/theater-detect" "$KWIN_SCRIPT"
@@ -491,7 +489,7 @@ EOF
 
 do_uninstall() {
     echo "The following will be removed:"
-    local targets=("$LIBEXEC_DIR" "$CLIENT" "$CLIENT_ALIAS" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA" \
+    local targets=("$LIBEXEC_DIR" "$CLIENT" "$KWIN_SCRIPT" "$UNIT" "$APP_DATA" \
                    "$WANTS_LINK" \
                    "$BIN_DIR/theater-dimmer" "$BIN_DIR/theater-art" "$BIN_DIR/theater-moded")
     local found=0

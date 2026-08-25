@@ -108,7 +108,7 @@ class TestDimCommands(DimEffectTestCase):
 class TestPerOutputSettings(DimEffectTestCase):
     def config(self, **overrides: OutputOverrideConfig) -> ResolvedConfig:
         return ResolvedConfig(
-            effect=EffectConfig(dimming=0.85, art=False),
+            effect=EffectConfig(dimming=0.85, artwork=False),
             transition=TransitionConfig(duration=2.0, curve="sine"),
             outputs=dict(overrides),
         )
@@ -116,7 +116,7 @@ class TestPerOutputSettings(DimEffectTestCase):
     def test_every_output_stays_in_the_dimmed_set(self) -> None:
         """A per-output override must not fade the other secondary displays back out."""
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=self.config(**{"DP-3": OutputOverrideConfig(dimming=0.4)}),
         )
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
@@ -128,7 +128,7 @@ class TestPerOutputSettings(DimEffectTestCase):
 
     def test_zero_dimming_leaves_one_output_untouched(self) -> None:
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=self.config(**{"DP-3": OutputOverrideConfig(dimming=0.0)}),
         )
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
@@ -140,9 +140,9 @@ class TestPerOutputSettings(DimEffectTestCase):
 
     def test_zero_dimming_everywhere_reverts_instead_of_dimming(self) -> None:
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=ResolvedConfig(
-                effect=EffectConfig(dimming=0.0, art=False),
+                effect=EffectConfig(dimming=0.0, artwork=False),
                 transition=TransitionConfig(duration=2.0, curve="sine"),
             ),
         )
@@ -152,7 +152,7 @@ class TestPerOutputSettings(DimEffectTestCase):
         self.assertEqual(effect.affected_outputs, ())
 
     def test_outputs_matching_the_globals_are_not_retuned(self) -> None:
-        effect = DimEffect(art=False, resolved_config=self.config())
+        effect = DimEffect(artwork=False, resolved_config=self.config())
         effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
 
         self.assertEqual(
@@ -168,7 +168,7 @@ class TestPerOutputSettings(DimEffectTestCase):
 
     def test_per_output_duration_and_curve_are_applied(self) -> None:
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=self.config(
                 **{"DP-2": OutputOverrideConfig(duration=0.5, curve="linear")}
             ),
@@ -179,7 +179,7 @@ class TestPerOutputSettings(DimEffectTestCase):
 
     def test_per_output_placement_is_applied(self) -> None:
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=self.config(
                 **{"DP-2": OutputOverrideConfig(placement="behind_windows")}
             ),
@@ -195,7 +195,7 @@ class TestPerOutputSettings(DimEffectTestCase):
             "DP-2": parse_edid("DP-2", build_edid(serial_text="AAA1111")),
         }
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=self.config(
                 **{"DEL:DELL S2721QS:AAA1111": OutputOverrideConfig(dimming=0.4)}
             ),
@@ -210,7 +210,7 @@ class TestPerOutputSettings(DimEffectTestCase):
         self.assertIn("dimming=0.4", matched[0])
 
     def test_outputs_without_a_rule_are_not_logged(self) -> None:
-        effect = DimEffect(art=False, resolved_config=self.config())
+        effect = DimEffect(artwork=False, resolved_config=self.config())
 
         with self.assertLogs("theater-moded", level="INFO") as logs:
             effect.apply("DP-1", ["DP-2", "DP-3"], "1245620")
@@ -224,7 +224,7 @@ class TestPerOutputSettings(DimEffectTestCase):
             "DP-3": parse_edid("DP-3", build_edid(serial_text="BBB2222")),
         }
         effect = DimEffect(
-            art=False,
+            artwork=False,
             resolved_config=self.config(
                 **{
                     "DEL:DELL S2721QS:BBB2222": OutputOverrideConfig(dimming=0.4),
@@ -241,7 +241,7 @@ class TestPerOutputSettings(DimEffectTestCase):
     def test_per_output_dimming_reaches_the_artwork(self) -> None:
         effect = DimEffect(
             resolved_config=ResolvedConfig(
-                effect=EffectConfig(dimming=0.85, art=True),
+                effect=EffectConfig(dimming=0.85, artwork=True),
                 outputs={"DP-3": OutputOverrideConfig(dimming=0.4)},
             )
         )
@@ -255,7 +255,7 @@ class TestPerOutputSettings(DimEffectTestCase):
 
 class TestArtworkHandling(DimEffectTestCase):
     def test_artwork_disabled_clears_every_output(self) -> None:
-        effect = DimEffect(art=False)
+        effect = DimEffect(artwork=False)
         effect.apply("DP-1", ["DP-2"], "1245620")
 
         self.assertEqual(
@@ -310,17 +310,17 @@ class TestHelperLifecycle(DimEffectTestCase):
         self.assertNotIn("stderr", self.popen.call_args.kwargs)
 
     def test_apply_reports_success_and_failure(self) -> None:
-        effect = DimEffect(art=False)
+        effect = DimEffect(artwork=False)
         self.assertTrue(effect.apply("DP-1", ["DP-2"], "1245620"))
 
         dead = make_process()
         dead.stdin.write.side_effect = BrokenPipeError("gone")
         self.popen.return_value = dead
-        broken_effect = DimEffect(art=False)
+        broken_effect = DimEffect(artwork=False)
         self.assertFalse(broken_effect.apply("DP-1", ["DP-2"], "1245620"))
 
     def test_is_running_reports_process_state(self) -> None:
-        effect = DimEffect(art=False)
+        effect = DimEffect(artwork=False)
         self.assertFalse(effect.is_running)
 
         effect.apply("DP-1", ["DP-2"], "1245620")
@@ -334,7 +334,7 @@ class TestHelperLifecycle(DimEffectTestCase):
         dead.stdin.write.side_effect = BrokenPipeError("gone")
         self.popen.return_value = dead
 
-        effect = DimEffect(art=False)
+        effect = DimEffect(artwork=False)
         with self.assertLogs("theater-moded", level="ERROR"):
             effect.apply("DP-1", ["DP-2"], "1245620")
 

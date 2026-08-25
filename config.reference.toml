@@ -27,7 +27,7 @@ dimming = 0.85
 
 # Show active Steam game library hero artwork on secondary displays (true) or
 # flat dark color (false).
-art = true
+artwork = true
 
 
 [transition]
@@ -41,16 +41,16 @@ duration = 2.0
 curve = "sine"
 
 
-[daemon]
+[behavior]
 # Grace period in seconds before restoring displays after all game windows
 # close (0 disables delay).
 # Range: [min: 0.0, max: 300.0]
-revert_delay = 3.0
+restore_delay = 3.0
 
 # Stability delay in seconds before following a game window when it moves to a
 # different display.
 # Range: [min: 0.0, max: 60.0]
-stage_delay = 1.5
+follow_delay = 1.5
 
 # Only activate theater mode when the game window enters true fullscreen.
 require_fullscreen = false
@@ -58,7 +58,7 @@ require_fullscreen = false
 # -----------------------------------------------------------------------------
 # Per-Output Overrides (Optional)
 #
-# Overridable keys: placement, dimming, art, duration, curve
+# Overridable keys: placement, dimming, artwork, duration, curve
 #
 # Outputs are matched in this order, and the first section that exists wins:
 #   1. make:model:serial  - pins one physical panel, even among identical models
@@ -72,7 +72,7 @@ require_fullscreen = false
 # dimming = 0.90
 #
 # [outputs."Dell Inc.:DELL S2721QS"]
-# art = false
+# artwork = false
 #
 # [outputs.DP-2]
 # dimming = 0.50

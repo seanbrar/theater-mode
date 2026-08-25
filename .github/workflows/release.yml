@@ -114,7 +114,7 @@ jobs:
 
           env -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_BIN_HOME -u XDG_CACHE_HOME \
             HOME="$PWD/fakehome" "$root/install.sh" --no-service
-          for file in .local/bin/theater-mode .local/bin/theatre-mode \
+          for file in .local/bin/theater-mode \
                       .local/libexec/theater-mode/theater-moded \
                       .local/libexec/theater-mode/theater-dimmer \
                       .local/libexec/theater-mode/theater-art \

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, PropertyMock, patch
 
-from theater_mode.config import DaemonConfig, DevConfig, ResolvedConfig
+from theater_mode.config import BehaviorConfig, DevConfig, ResolvedConfig
 from theater_mode.daemon import Daemon
 from theater_mode.display.edid import OutputIdentity
 
@@ -68,7 +68,7 @@ class TestDaemon(unittest.TestCase):
         self.scheduler = FakeScheduler()
         self.daemon = Daemon(
             effect=self.mock_effect,
-            config=ResolvedConfig(daemon=DaemonConfig(revert_delay=0.0, stage_delay=0.0)),
+            config=ResolvedConfig(behavior=BehaviorConfig(restore_delay=0.0, follow_delay=0.0)),
             scheduler=self.scheduler,
             dev_config=DevConfig(
                 user_config_override=config_dir / "user.toml",
@@ -164,7 +164,7 @@ class TestDaemon(unittest.TestCase):
 
         reload_res = self.daemon.reload()
         self.assertIn("reloaded", reload_res)
-        self.assertEqual(self.daemon.config.daemon.revert_delay, 3.0)
+        self.assertEqual(self.daemon.config.behavior.restore_delay, 3.0)
 
     def test_invalid_keys_are_rejected_not_persisted(self) -> None:
         result = self.daemon.commit('{"effect.dimming": 99.0, "effect.nonsense": 1}')
@@ -179,11 +179,11 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(self.daemon.config.effect.dimming, 0.4)
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
-    def test_revert_delay_fades_out_after_timeout(self, _) -> None:
+    def test_restore_delay_fades_out_after_timeout(self, _) -> None:
         scheduler = FakeScheduler()
         daemon = Daemon(
             effect=self.mock_effect,
-            config=ResolvedConfig(daemon=DaemonConfig(revert_delay=3.0, stage_delay=0.0)),
+            config=ResolvedConfig(behavior=BehaviorConfig(restore_delay=3.0, follow_delay=0.0)),
             scheduler=scheduler,
         )
 
@@ -205,11 +205,11 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(scheduler.pending_count, 0)
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
-    def test_revert_delay_cancelled_by_new_game_window(self, _) -> None:
+    def test_restore_delay_cancelled_by_new_game_window(self, _) -> None:
         scheduler = FakeScheduler()
         daemon = Daemon(
             effect=self.mock_effect,
-            config=ResolvedConfig(daemon=DaemonConfig(revert_delay=3.0, stage_delay=0.0)),
+            config=ResolvedConfig(behavior=BehaviorConfig(restore_delay=3.0, follow_delay=0.0)),
             scheduler=scheduler,
         )
 
@@ -227,11 +227,11 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(daemon.active_output, "DP-1")
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
-    def test_stage_delay_on_output_migration(self, _) -> None:
+    def test_follow_delay_on_output_migration(self, _) -> None:
         scheduler = FakeScheduler()
         daemon = Daemon(
             effect=self.mock_effect,
-            config=ResolvedConfig(daemon=DaemonConfig(revert_delay=0.0, stage_delay=1.5)),
+            config=ResolvedConfig(behavior=BehaviorConfig(restore_delay=0.0, follow_delay=1.5)),
             scheduler=scheduler,
         )
 
@@ -253,11 +253,11 @@ class TestDaemon(unittest.TestCase):
         self.assertEqual(daemon.active_output, "DP-2")
 
     @patch("theater_mode.daemon.connected_outputs", return_value={"DP-1", "DP-2"})
-    def test_stage_delay_cancelled_if_window_returns_to_original_screen(self, _) -> None:
+    def test_follow_delay_cancelled_if_window_returns_to_original_screen(self, _) -> None:
         scheduler = FakeScheduler()
         daemon = Daemon(
             effect=self.mock_effect,
-            config=ResolvedConfig(daemon=DaemonConfig(revert_delay=0.0, stage_delay=1.5)),
+            config=ResolvedConfig(behavior=BehaviorConfig(restore_delay=0.0, follow_delay=1.5)),
             scheduler=scheduler,
         )
 

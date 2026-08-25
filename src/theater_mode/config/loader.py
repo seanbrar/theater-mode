@@ -16,7 +16,7 @@ from theater_mode.config.schema import (
     EFFECT_FIELDS,
     SCHEMA_TABLES,
     TRANSITION_FIELDS,
-    DaemonConfig,
+    BehaviorConfig,
     EffectConfig,
     FieldSpec,
     OutputOverrideConfig,
@@ -316,7 +316,7 @@ class ConfigLoader:
         tables: dict[str, dict[str, Any]],
         provenance: dict[str, Provenance],
     ) -> None:
-        """Merge one known top-level table ([effect], [transition], [daemon])."""
+        """Merge one known top-level table ([effect], [transition], [behavior])."""
         if not isinstance(section, dict):
             self._warn(
                 name,
@@ -409,7 +409,7 @@ class ConfigLoader:
         return ResolvedConfig(
             effect=EffectConfig(**tables["effect"]),
             transition=TransitionConfig(**tables["transition"]),
-            daemon=DaemonConfig(**tables["daemon"]),
+            behavior=BehaviorConfig(**tables["behavior"]),
             outputs={k: OutputOverrideConfig(**v) for k, v in outputs.items()},
             provenance=provenance,
         )

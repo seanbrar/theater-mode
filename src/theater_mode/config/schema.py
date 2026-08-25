@@ -13,13 +13,13 @@ VALID_PLACEMENTS: frozenset[str] = frozenset({"over_windows", "behind_windows"})
 
 DEFAULT_PLACEMENT = "over_windows"
 DEFAULT_DIMMING = 0.85
-DEFAULT_ART = True
+DEFAULT_ARTWORK = True
 
 DEFAULT_DURATION = 2.0
 DEFAULT_CURVE = "sine"
 
-DEFAULT_REVERT_DELAY = 3.0
-DEFAULT_STAGE_DELAY = 1.5
+DEFAULT_RESTORE_DELAY = 3.0
+DEFAULT_FOLLOW_DELAY = 1.5
 DEFAULT_REQUIRE_FULLSCREEN = False
 
 
@@ -53,10 +53,10 @@ EFFECT_FIELDS: dict[str, FieldSpec] = {
         max_value=1.0,
         doc="How dark this display becomes: 0.0 leaves it untouched, 0.85 leaves 15% brightness, and 1.0 is solid black. With artwork enabled the value sets how darkly the artwork is drawn; with artwork off it sets how much of your desktop stays visible. Under placement 'behind_windows' it applies only behind your open windows, where a lower value usually reads better.",
     ),
-    "art": FieldSpec(
-        key="art",
+    "artwork": FieldSpec(
+        key="artwork",
         type_name="boolean",
-        default=DEFAULT_ART,
+        default=DEFAULT_ARTWORK,
         doc="Show active Steam game library hero artwork on secondary displays (true) or flat dark color (false).",
     ),
 }
@@ -79,20 +79,20 @@ TRANSITION_FIELDS: dict[str, FieldSpec] = {
     ),
 }
 
-DAEMON_FIELDS: dict[str, FieldSpec] = {
-    "revert_delay": FieldSpec(
-        key="revert_delay",
+BEHAVIOR_FIELDS: dict[str, FieldSpec] = {
+    "restore_delay": FieldSpec(
+        key="restore_delay",
         type_name="float",
-        default=DEFAULT_REVERT_DELAY,
+        default=DEFAULT_RESTORE_DELAY,
         min_value=0.0,
         max_value=300.0,
         allow_in_output=False,
         doc="Grace period in seconds before restoring displays after all game windows close (0 disables delay).",
     ),
-    "stage_delay": FieldSpec(
-        key="stage_delay",
+    "follow_delay": FieldSpec(
+        key="follow_delay",
         type_name="float",
-        default=DEFAULT_STAGE_DELAY,
+        default=DEFAULT_FOLLOW_DELAY,
         min_value=0.0,
         max_value=60.0,
         allow_in_output=False,
@@ -110,7 +110,7 @@ DAEMON_FIELDS: dict[str, FieldSpec] = {
 SCHEMA_TABLES: dict[str, dict[str, FieldSpec]] = {
     "effect": EFFECT_FIELDS,
     "transition": TRANSITION_FIELDS,
-    "daemon": DAEMON_FIELDS,
+    "behavior": BEHAVIOR_FIELDS,
 }
 
 
@@ -120,13 +120,13 @@ class EffectConfig:
 
     placement: str = DEFAULT_PLACEMENT
     dimming: float = DEFAULT_DIMMING
-    art: bool = DEFAULT_ART
+    artwork: bool = DEFAULT_ARTWORK
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "placement": self.placement,
             "dimming": self.dimming,
-            "art": self.art,
+            "artwork": self.artwork,
         }
 
 
@@ -145,17 +145,17 @@ class TransitionConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class DaemonConfig:
-    """Resolved daemon lifecycle and game detection settings."""
+class BehaviorConfig:
+    """Resolved responses to a game window opening, moving, or closing."""
 
-    revert_delay: float = DEFAULT_REVERT_DELAY
-    stage_delay: float = DEFAULT_STAGE_DELAY
+    restore_delay: float = DEFAULT_RESTORE_DELAY
+    follow_delay: float = DEFAULT_FOLLOW_DELAY
     require_fullscreen: bool = DEFAULT_REQUIRE_FULLSCREEN
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "revert_delay": self.revert_delay,
-            "stage_delay": self.stage_delay,
+            "restore_delay": self.restore_delay,
+            "follow_delay": self.follow_delay,
             "require_fullscreen": self.require_fullscreen,
         }
 
@@ -166,14 +166,14 @@ class OutputOverrideConfig:
 
     placement: str | None = None
     dimming: float | None = None
-    art: bool | None = None
+    artwork: bool | None = None
     duration: float | None = None
     curve: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             field: val
-            for field in ("placement", "dimming", "art", "duration", "curve")
+            for field in ("placement", "dimming", "artwork", "duration", "curve")
             if (val := getattr(self, field)) is not None
         }
 
@@ -185,7 +185,7 @@ class ResolvedDisplaySettings:
     output_id: str
     placement: str
     dimming: float
-    art: bool
+    artwork: bool
     duration: float
     curve: str
     matched_key: str | None = None
@@ -197,7 +197,7 @@ class ResolvedConfig:
 
     effect: EffectConfig = field(default_factory=EffectConfig)
     transition: TransitionConfig = field(default_factory=TransitionConfig)
-    daemon: DaemonConfig = field(default_factory=DaemonConfig)
+    behavior: BehaviorConfig = field(default_factory=BehaviorConfig)
     outputs: dict[str, OutputOverrideConfig] = field(default_factory=dict)
     provenance: dict[str, Provenance] = field(default_factory=dict)
 
@@ -225,7 +225,7 @@ class ResolvedConfig:
             matched_key=matched_key,
             placement=(self.effect.placement if override.placement is None else override.placement),
             dimming=(self.effect.dimming if override.dimming is None else override.dimming),
-            art=self.effect.art if override.art is None else override.art,
+            artwork=self.effect.artwork if override.artwork is None else override.artwork,
             duration=(self.transition.duration if override.duration is None else override.duration),
             curve=self.transition.curve if override.curve is None else override.curve,
         )
@@ -235,7 +235,7 @@ class ResolvedConfig:
         return {
             "effect": self.effect.to_dict(),
             "transition": self.transition.to_dict(),
-            "daemon": self.daemon.to_dict(),
+            "behavior": self.behavior.to_dict(),
             "outputs": {k: v.to_dict() for k, v in self.outputs.items()},
             "provenance": {k: v.to_dict() for k, v in self.provenance.items()},
         }

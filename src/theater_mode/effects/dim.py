@@ -43,7 +43,7 @@ class DimEffect(Effect):
         dimming: float = DEFAULT_DIMMING,
         duration: float = DEFAULT_DURATION,
         curve: str = DEFAULT_CURVE,
-        art: bool = True,
+        artwork: bool = True,
         binary_path: Path | str | None = None,
         resolved_config: ResolvedConfig | None = None,
     ) -> None:
@@ -51,7 +51,7 @@ class DimEffect(Effect):
         self._dimming = dimming
         self._duration = duration
         self._curve = curve.lower()
-        self._art = art
+        self._artwork = artwork
         self._custom_binary = Path(binary_path) if binary_path else None
         self._resolved_config = resolved_config
         self._process: subprocess.Popen[str] | None = None
@@ -66,7 +66,7 @@ class DimEffect(Effect):
             dimming=options.dimming,
             duration=options.dim_duration,
             curve=options.dim_curve,
-            art=options.art,
+            artwork=options.artwork,
             resolved_config=options.resolved_config,
         )
 
@@ -77,7 +77,7 @@ class DimEffect(Effect):
         self._dimming = options.dimming
         self._duration = options.dim_duration
         self._curve = options.dim_curve.lower()
-        self._art = options.art
+        self._artwork = options.artwork
         self._resolved_config = options.resolved_config
 
     def _ensure_process(self) -> bool:
@@ -151,7 +151,7 @@ class DimEffect(Effect):
                 output_id=output,
                 placement=self._placement,
                 dimming=self._dimming,
-                art=self._art,
+                artwork=self._artwork,
                 duration=self._duration,
                 curve=self._curve,
             )
@@ -182,7 +182,7 @@ class DimEffect(Effect):
             "dimming": self._dimming,
             "duration": self._duration,
             "curve": self._curve,
-            "art": self._art,
+            "artwork": self._artwork,
         }
 
         for output in targets:
@@ -250,7 +250,7 @@ class DimEffect(Effect):
                     for name, identity in sorted(identities.items())
                 ),
             )
-        sizes = output_modes() if any(s.art for s in settings.values()) else {}
+        sizes = output_modes() if any(s.artwork for s in settings.values()) else {}
 
         with_art: list[str] = []
         artwork_requests: dict[tuple[str, int, int, float], Path | None] = {}
@@ -259,7 +259,7 @@ class DimEffect(Effect):
             # A restarted helper has forgotten every output's layer.
             if not self._send(self.layer_command(output, resolved.placement)):
                 return False
-            output_size = sizes.get(output) if resolved.art else None
+            output_size = sizes.get(output) if resolved.artwork else None
             render_size = artwork_render_size(*output_size) if output_size else None
             artwork = None
             if appid and render_size:

@@ -47,10 +47,10 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(len(diagnostics), 0)
         self.assertEqual(config.effect.placement, "over_windows")
         self.assertEqual(config.effect.dimming, 0.85)
-        self.assertTrue(config.effect.art)
+        self.assertTrue(config.effect.artwork)
         self.assertEqual(config.transition.duration, 2.0)
         self.assertEqual(config.transition.curve, "sine")
-        self.assertEqual(config.daemon.revert_delay, 3.0)
+        self.assertEqual(config.behavior.restore_delay, 3.0)
 
         for prov in config.provenance.values():
             self.assertEqual(prov.layer, Layer.BUILTIN)
@@ -62,7 +62,7 @@ class TestConfig(unittest.TestCase):
             """
 [effect]
 dimming = 0.50
-art = false
+artwork = false
 
 [transition]
 duration = 4.0
@@ -96,14 +96,14 @@ duration = 1.0
         self.assertEqual(config.transition.duration, 1.0)
         self.assertEqual(config.provenance["transition.duration"].layer, Layer.USER)
 
-        self.assertFalse(config.effect.art)
-        self.assertEqual(config.provenance["effect.art"].layer, Layer.SYSTEM)
-        self.assertEqual(config.provenance["effect.art"].file_path, self.sys_path)
-        self.assertEqual(config.provenance["effect.art"].line_number, 4)
+        self.assertFalse(config.effect.artwork)
+        self.assertEqual(config.provenance["effect.artwork"].layer, Layer.SYSTEM)
+        self.assertEqual(config.provenance["effect.artwork"].file_path, self.sys_path)
+        self.assertEqual(config.provenance["effect.artwork"].line_number, 4)
 
         self.assertEqual(config.transition.curve, "sine")
         self.assertEqual(config.provenance["transition.curve"].layer, Layer.BUILTIN)
-        self.assertEqual(config.daemon.revert_delay, 3.0)
+        self.assertEqual(config.behavior.restore_delay, 3.0)
 
     def test_per_output_overrides_and_hierarchy(self) -> None:
         """Test per-output overrides and match priority."""
@@ -116,7 +116,7 @@ placement = "behind_windows"
 [outputs.DP-1]
 dimming = 0.40
 placement = "over_windows"
-art = false
+artwork = false
 
 [outputs."LG:27GL850:1234"]
 dimming = 0.95
@@ -134,13 +134,13 @@ dimming = 0.95
         dp1 = config.resolve_for_output("DP-1")
         self.assertEqual(dp1.dimming, 0.40)
         self.assertEqual(dp1.placement, "over_windows")
-        self.assertFalse(dp1.art)
+        self.assertFalse(dp1.artwork)
         self.assertEqual(dp1.curve, "sine")
 
         lg = config.resolve_for_output("DP-1", ["LG:27GL850:1234", "LG:27GL850"])
         self.assertEqual(lg.dimming, 0.95)
         self.assertEqual(lg.placement, "behind_windows")
-        self.assertTrue(lg.art)
+        self.assertTrue(lg.artwork)
 
         fallback = config.resolve_for_output("DP-1", ["Dell Inc.:U2720Q:ABC", "Dell Inc.:U2720Q"])
         self.assertEqual(fallback.dimming, 0.40)
@@ -153,14 +153,14 @@ dimming = 0.95
         self.assertIsNone(hdmi.matched_key)
         self.assertEqual(hdmi.dimming, 0.80)
         self.assertEqual(hdmi.placement, "behind_windows")
-        self.assertTrue(hdmi.art)
+        self.assertTrue(hdmi.artwork)
 
     def test_invalid_keys_in_output_produce_diagnostics(self) -> None:
         """Test that non-output keys in [outputs.<id>] are rejected with diagnostics."""
         self.user_path.write_text(
             """
 [outputs.DP-1]
-revert_delay = 5.0
+restore_delay = 5.0
 dimming = 0.50
 """,
             encoding="utf-8",
@@ -174,7 +174,7 @@ dimming = 0.50
 
         self.assertEqual(len(diagnostics), 1)
         self.assertIn("not allowed in per-output table", diagnostics[0].message)
-        self.assertEqual(diagnostics[0].key_path, "outputs.DP-1.revert_delay")
+        self.assertEqual(diagnostics[0].key_path, "outputs.DP-1.restore_delay")
         self.assertEqual(config.resolve_for_output("DP-1").dimming, 0.50)
 
     def test_malformed_toml_failure_posture(self) -> None:
@@ -253,8 +253,8 @@ duration = -5.0
 placement = "over_windows"
 dimming = 0.85  # Keep this comment
 
-[daemon]
-revert_delay = 3.0
+[behavior]
+restore_delay = 3.0
 """
         updated = update_toml_content(
             original,
@@ -334,7 +334,7 @@ revert_delay = 3.0
             {
                 f"outputs.{edid}.dimming": 0.3,
                 # Quoted and unquoted spellings address the same output ID.
-                f'outputs."{edid}".art': False,
+                f'outputs."{edid}".artwork': False,
             },
             self.user_path,
         )
@@ -342,7 +342,7 @@ revert_delay = 3.0
 
         parsed = tomllib.loads(self.user_path.read_text(encoding="utf-8"))
         self.assertEqual(list(parsed["outputs"]), [edid])
-        self.assertEqual(parsed["outputs"][edid], {"art": False, "dimming": 0.3})
+        self.assertEqual(parsed["outputs"][edid], {"artwork": False, "dimming": 0.3})
 
         dev = DevConfig(user_config_override=self.user_path, system_config_override=self.sys_path)
         config, diagnostics = load_resolved_config(dev_config=dev)
@@ -352,7 +352,7 @@ revert_delay = 3.0
 
     def test_writer_keeps_new_keys_inside_their_own_table(self) -> None:
         updated = update_toml_content(
-            '[effect]\nplacement = "over_windows"\n\n# daemon settings\n[daemon]\nrevert_delay = 3.0\n',
+            '[effect]\nplacement = "over_windows"\n\n# behavior settings\n[behavior]\nrestore_delay = 3.0\n',
             {"effect.dimming": 0.5},
         )
         self.assertEqual(
@@ -362,9 +362,9 @@ revert_delay = 3.0
                 'placement = "over_windows"',
                 "dimming = 0.5",
                 "",
-                "# daemon settings",
-                "[daemon]",
-                "revert_delay = 3.0",
+                "# behavior settings",
+                "[behavior]",
+                "restore_delay = 3.0",
             ],
         )
 
@@ -385,7 +385,7 @@ revert_delay = 3.0
                 "effect.dimming": 0.5,
                 "effect.dimming_typo": 0.5,
                 "transition.duration": 999.0,
-                "outputs.DP-1.revert_delay": 1.0,
+                "outputs.DP-1.restore_delay": 1.0,
                 "effect.placement": "BEHIND_WINDOWS",
             }
         )
@@ -460,7 +460,7 @@ revert_delay = 3.0
         ref = generate_reference_config()
         self.assertIn("[effect]", ref)
         self.assertIn("[transition]", ref)
-        self.assertIn("[daemon]", ref)
+        self.assertIn("[behavior]", ref)
         self.assertNotIn("THEATER_DEV", ref)
 
         parsed = tomllib.loads(ref)
