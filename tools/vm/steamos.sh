@@ -110,11 +110,11 @@ require_image_tools() {
 }
 
 validate_settings() {
-    [[ "$MEMORY" =~ ^[0-9]+$ ]] && [ "$MEMORY" -ge 2048 ] \
+    [[ "$MEMORY" =~ ^[0-9]+$ && "$MEMORY" -ge 2048 ]] \
         || die "THEATER_STEAMOS_MEMORY must be at least 2048"
-    [[ "$CPUS" =~ ^[0-9]+$ ]] && [ "$CPUS" -ge 1 ] \
+    [[ "$CPUS" =~ ^[0-9]+$ && "$CPUS" -ge 1 ]] \
         || die "THEATER_STEAMOS_CPUS must be a positive integer"
-    [[ "$OUTPUTS" =~ ^[0-9]+$ ]] && [ "$OUTPUTS" -ge 1 ] && [ "$OUTPUTS" -le 16 ] \
+    [[ "$OUTPUTS" =~ ^[0-9]+$ && "$OUTPUTS" -ge 1 && "$OUTPUTS" -le 16 ]] \
         || die "THEATER_STEAMOS_OUTPUTS must be between 1 and 16"
     [[ "$DISK_SIZE" =~ ^[0-9]+[GT]$ ]] || die "THEATER_STEAMOS_DISK must look like 64G"
     [[ "$VARIANT" =~ ^[a-z]+$ ]] || die "THEATER_STEAMOS_VARIANT must be a bare name"
@@ -133,7 +133,7 @@ validate_settings() {
         *) die "THEATER_STEAMOS_MACHINE must be pc or q35" ;;
     esac
     if [ -n "$SSH_PORT" ]; then
-        [[ "$SSH_PORT" =~ ^[0-9]+$ ]] && [ "$SSH_PORT" -ge 1024 ] && [ "$SSH_PORT" -le 65535 ] \
+        [[ "$SSH_PORT" =~ ^[0-9]+$ && "$SSH_PORT" -ge 1024 && "$SSH_PORT" -le 65535 ]] \
             || die "THEATER_STEAMOS_SSH_PORT must be between 1024 and 65535"
     fi
 }
@@ -1006,9 +1006,9 @@ cmd_check() {
     local port status dimmer art
     dimmer="$REPO_DIR/src/theater_mode/dimmer/theater-dimmer"
     art="$REPO_DIR/src/theater_mode/art/theater-art"
-    [ -x "$dimmer" ] && [ -x "$art" ] || {
+    if [ ! -x "$dimmer" ] || [ ! -x "$art" ]; then
         die "helpers not built; run: make -C src/theater_mode/dimmer && make -C src/theater_mode/art"
-    }
+    fi
 
     require_qemu
     require_image_tools
