@@ -12,6 +12,8 @@ out_dir="$1"
 tag="${2:-}"
 source_version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/theater_mode/__init__.py)"
 [ -n "$source_version" ] || die "could not read the source version"
+[[ "$source_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc|exp)\.(0|[1-9][0-9]*))?$ ]] \
+    || die "unsupported release version: $source_version"
 [ -n "$tag" ] || tag="v$source_version"
 [ "${tag#v}" = "$source_version" ] \
     || die "tag $tag does not match __version__ $source_version"

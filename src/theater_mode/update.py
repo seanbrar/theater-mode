@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import platform
 import re
@@ -16,7 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from theater_mode import __version__
-from theater_mode.constants import ART_BINARY_NAME, DIMMER_BINARY_NAME, PROJECT_REPO, RELEASE_API
+from theater_mode.constants import (
+    ART_BINARY_NAME,
+    DIMMER_BINARY_NAME,
+    PROJECT_REPO,
+    RELEASE_API,
+    RELEASES_API,
+)
 
 _TIMEOUT = 30
 _USER_AGENT = f"theater-mode/{__version__}"
@@ -36,9 +43,13 @@ class Release:
 
 
 _VERSION_RE = re.compile(
-    r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?"
+    r"^v?([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?"
     r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_PUBLISHED_VERSION_RE = re.compile(
+    r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(?:alpha|beta|rc|exp)\.(?:0|[1-9][0-9]*))?$"
 )
 
 
@@ -64,12 +75,19 @@ def is_newer(candidate: str, current: str) -> bool:
     return candidate_key is not None and current_key is not None and candidate_key > current_key
 
 
+def is_prerelease(version: str) -> bool:
+    """Report whether a version carries a prerelease identifier."""
+    match = _VERSION_RE.fullmatch(version)
+    return match is not None and match.group(4) is not None
+
+
 def _https_url(value: object) -> str | None:
     """Accept a download URL only if it is HTTPS, so _get never opens file:// or ftp://."""
     return value if isinstance(value, str) and value.startswith("https://") else None
 
 
-def _get(url: str) -> bytes:
+def _get(url: str, *, not_found: str) -> bytes:
+    """Return an HTTPS response body, reporting a 404 as not_found."""
     if not url.startswith("https://"):
         raise UpdateError(f"refusing to fetch a non-HTTPS URL: {url}")
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
@@ -78,9 +96,7 @@ def _get(url: str) -> bytes:
             return response.read()
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            raise UpdateError(
-                f"no releases published for {PROJECT_REPO} yet, or the repository is private"
-            ) from exc
+            raise UpdateError(not_found) from exc
         if exc.code in (403, 429):
             raise UpdateError(
                 "GitHub is rate-limiting this address; try again in a few minutes"
@@ -88,7 +104,8 @@ def _get(url: str) -> bytes:
         raise UpdateError(f"could not reach GitHub ({exc.code} {exc.reason})") from exc
     except urllib.error.URLError as exc:
         raise UpdateError(f"could not reach GitHub: {exc.reason}") from exc
-    except OSError as exc:
+    except (http.client.HTTPException, OSError) as exc:
+        # A truncated or malformed response raises HTTPException, which is not an OSError.
         raise UpdateError(f"could not download from GitHub: {exc}") from exc
 
 
@@ -97,17 +114,52 @@ def release_asset_name(version: str) -> str:
     return f"theater-mode-v{version}-linux-{platform.machine()}.tar.gz"
 
 
+def normalize_release_version(text: str) -> str:
+    """Return a supported release version without its optional tag prefix.
+
+    Raise UpdateError when the version is outside the project's published tag forms.
+    """
+    version = text.removeprefix("v")
+    if _PUBLISHED_VERSION_RE.fullmatch(version) is None:
+        raise UpdateError(f"invalid release version: {text}")
+    return version
+
+
+def fetch_release(version: str) -> Release:
+    """Look up one published release and the asset built for this architecture."""
+    requested = normalize_release_version(version)
+    return _fetch_release(
+        f"{RELEASES_API}/tags/v{requested}",
+        expected_version=requested,
+        not_found=f"release v{requested} was not found on GitHub",
+    )
+
+
 def fetch_latest() -> Release:
-    """Look up the newest published release and the asset built for this architecture."""
+    """Look up the newest stable release and the asset built for this architecture."""
+    return _fetch_release(
+        RELEASE_API,
+        not_found=f"no stable releases were found for {PROJECT_REPO}",
+    )
+
+
+def _fetch_release(url: str, *, not_found: str, expected_version: str | None = None) -> Release:
+    """Read release metadata from url and select this machine's artifact."""
     try:
-        payload = json.loads(_get(RELEASE_API))
+        payload = json.loads(_get(url, not_found=not_found))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise UpdateError("GitHub returned invalid release metadata; try again later") from exc
     if not isinstance(payload, dict):
         raise UpdateError("GitHub returned unexpected release metadata; try again later")
-    version = str(payload.get("tag_name", "")).lstrip("v")
+    tag = payload.get("tag_name")
+    version = tag.removeprefix("v") if isinstance(tag, str) else ""
     if not version:
-        raise UpdateError("the latest release has no version tag")
+        raise UpdateError("the release has no version tag")
+    if expected_version is not None and version != expected_version:
+        raise UpdateError(
+            f"GitHub returned v{version} when v{expected_version} was requested; "
+            "refusing to install it"
+        )
 
     filename = release_asset_name(version)
     tarball = checksum = None
@@ -171,50 +223,88 @@ def _run_installer(root: Path) -> None:
         raise UpdateError(f"the installer exited with status {result.returncode}")
 
 
-def check(stream=sys.stdout) -> int:
-    """Report whether a newer release exists, without changing anything."""
+def _verb(candidate: str) -> str:
+    """Return the display verb for an installation step."""
+    if is_newer(candidate, __version__):
+        return "Updating"
+    if is_newer(__version__, candidate):
+        return "Downgrading"
+    return "Reinstalling"
+
+
+def _report_current(stable_version: str, stream) -> None:
+    """Print that theater-mode is up to date, or how a testing build can return to stable."""
+    if is_prerelease(__version__):
+        print(f"theater-mode {__version__} is a testing build.", file=stream)
+        print(
+            f"The latest stable release is {stable_version}. "
+            f"Return to it with: theater-mode update --release {stable_version}",
+            file=stream,
+        )
+    else:
+        print(f"theater-mode {__version__} is up to date.", file=stream)
+
+
+def check(*, stream=sys.stdout) -> int:
+    """Report whether a newer stable release exists, without changing anything."""
     release = fetch_latest()
     if is_newer(release.version, __version__):
         print(f"theater-mode {release.version} is available (you have {__version__}).", file=stream)
         print("Install it with: theater-mode update", file=stream)
     else:
-        print(f"theater-mode {__version__} is up to date.", file=stream)
+        _report_current(release.version, stream)
     return 0
 
 
-def apply(stream=sys.stdout) -> int:
-    """Download, verify, and install the newest release over this one."""
-    release = fetch_latest()
-    if not is_newer(release.version, __version__):
-        print(f"theater-mode {__version__} is already up to date.", file=stream)
+def apply(release_version: str | None = None, *, stream=sys.stdout) -> int:
+    """Download, verify, and install the stable or explicitly selected release."""
+    release = fetch_latest() if release_version is None else fetch_release(release_version)
+    if release_version is None and not is_newer(release.version, __version__):
+        _report_current(release.version, stream)
         return 0
 
+    machine = platform.machine()
     if not release.tarball_url:
         raise UpdateError(
-            f"release {release.version} has no build for {platform.machine()}.\n"
+            f"release v{release.version} has no build for {machine}.\n"
             "  Install from source instead:\n"
             f"    git clone https://github.com/{PROJECT_REPO}\n"
             "    cd theater-mode && ./install.sh --build"
         )
     if not release.checksum_url:
         raise UpdateError(
-            f"release {release.version} publishes no checksum for this architecture; "
+            f"release v{release.version} publishes no checksum for this architecture; "
             "refusing to install an unverified archive"
         )
 
     # The installer writes straight to this descriptor. A block-buffered stream, which is
     # what stdout is whenever it is not a terminal, would otherwise flush this line after it.
-    print(f"Updating theater-mode {__version__} -> {release.version}", file=stream, flush=True)
+    print(
+        f"{_verb(release.version)} theater-mode {__version__} -> {release.version}",
+        file=stream,
+        flush=True,
+    )
 
     with tempfile.TemporaryDirectory(prefix="theater-mode-update-") as tmp:
         work = Path(tmp)
         archive = work / "release.tar.gz"
         try:
-            archive.write_bytes(_get(release.tarball_url))
+            archive.write_bytes(
+                _get(
+                    release.tarball_url,
+                    not_found=f"release v{release.version} has no archive for {machine} on GitHub",
+                )
+            )
         except OSError as exc:
             raise UpdateError(f"could not save the downloaded release: {exc}") from exc
 
-        _verify_checksum(archive, _get(release.checksum_url))
+        _verify_checksum(
+            archive,
+            _get(
+                release.checksum_url,
+                not_found=f"release v{release.version} has no checksum for {machine} on GitHub",
+            ),
+        )
 
         extracted = work / "tree"
         try:

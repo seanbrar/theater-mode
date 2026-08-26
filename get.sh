@@ -4,20 +4,50 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/seanbrar/theater-mode/main/get.sh | bash
 #
-# Downloads the latest release, verifies its checksum and, where `gh` is available, its
+# Downloads a release, verifies its checksum and, where `gh` is available, its
 # build provenance, then runs its installer.
 #
-# Arguments after `-s --` are passed straight through to install.sh, e.g.
+# Bootstrap options are consumed here; other arguments are passed through to install.sh.
 #
 #   curl -fsSL .../get.sh | bash -s -- --no-service
+#   curl -fsSL .../get.sh | bash -s -- --release 0.2.0-beta.1
 #
 set -euo pipefail
 
 REPO="${THEATER_MODE_REPO:-seanbrar/theater-mode}"
-API="https://api.github.com/repos/${REPO}/releases/latest"
 
 die()  { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 info() { printf '  %s\n' "$*"; }
+
+REQUESTED=""
+RELEASE_SET=0
+INSTALL_ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --release=*) REQUESTED="${1#*=}"; RELEASE_SET=1 ;;
+        --release)
+            [ $# -ge 2 ] || die "--release requires a version"
+            REQUESTED="$2"
+            RELEASE_SET=1
+            shift
+            ;;
+        *) INSTALL_ARGS+=("$1") ;;
+    esac
+    shift
+done
+
+# Preserve the version's original spelling for validation errors.
+RELEASE="${REQUESTED#v}"
+if [ "$RELEASE_SET" -eq 1 ]; then
+    [[ "$RELEASE" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc|exp)\.(0|[1-9][0-9]*))?$ ]] \
+        || die "invalid release version: $REQUESTED"
+    API="https://api.github.com/repos/${REPO}/releases/tags/v${RELEASE}"
+    API_MISSING="release v$RELEASE was not found on GitHub"
+else
+    API="https://api.github.com/repos/${REPO}/releases/latest"
+    API_MISSING="no stable releases were found for $REPO"
+fi
 
 # --------------------------------------------------------------------------
 
@@ -29,13 +59,44 @@ need() {
 need tar ""
 need python3 " (theater-mode is written in Python)"
 
-if command -v curl >/dev/null 2>&1; then
-    fetch() { curl -fsSL "$1"; }
-elif command -v wget >/dev/null 2>&1; then
-    fetch() { wget -qO- "$1"; }
-else
-    die "neither curl nor wget is installed"
-fi
+# Arguments are a URL, a destination path or `-` for stdout, and the message for a 404.
+fetch() {
+    python3 - "$@" <<'PY'
+import http.client
+import shutil
+import sys
+import urllib.error
+import urllib.request
+
+url, destination, missing = sys.argv[1], sys.argv[2], sys.argv[3]
+
+
+def die(message):
+    sys.stderr.write(f"\033[31merror:\033[0m {message}\n")
+    raise SystemExit(1)
+
+
+request = urllib.request.Request(url, headers={"User-Agent": "theater-mode-installer"})
+try:
+    with urllib.request.urlopen(request, timeout=30) as response:
+        if destination == "-":
+            shutil.copyfileobj(response, sys.stdout.buffer)
+        else:
+            with open(destination, "wb") as sink:
+                shutil.copyfileobj(response, sink)
+except urllib.error.HTTPError as exc:
+    if exc.code == 404:
+        die(missing)
+    if exc.code in (403, 429):
+        die("GitHub is rate-limiting this address; try again in a few minutes")
+    die(f"could not reach GitHub ({exc.code} {exc.reason})")
+except urllib.error.URLError as exc:
+    die(f"could not reach GitHub: {exc.reason}")
+except (http.client.HTTPException, OSError) as exc:
+    # A truncated or malformed response raises HTTPException, which is not an OSError.
+    die(f"could not download from GitHub: {exc}")
+PY
+}
 
 if command -v sha256sum >/dev/null 2>&1; then
     digest() { sha256sum "$1" | awk '{print $1}'; }
@@ -51,25 +112,40 @@ case "$(uname -s)" in
     *) die "theater-mode only runs on Linux (this is $(uname -s))" ;;
 esac
 
-echo "Looking up the latest theater-mode release..."
-META="$(fetch "$API")" || die "could not reach GitHub. Check your network and try again."
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+if [ "$RELEASE_SET" -eq 1 ]; then
+    echo "Looking up theater-mode v$RELEASE..."
+else
+    echo "Looking up the latest theater-mode release..."
+fi
+META="$(fetch "$API" - "$API_MISSING")"
 
 # Python is already a runtime requirement, so the bootstrap does not need jq.
 PARSED="$(printf '%s' "$META" | python3 -c '
 import json, sys
 arch = sys.argv[1]
+
+def die(reason):
+    sys.stderr.write(f"\033[31merror:\033[0m GitHub returned {reason}. Try again later.\n")
+    raise SystemExit(1)
+
 try:
     data = json.load(sys.stdin)
 except (json.JSONDecodeError, UnicodeError) as exc:
-    raise SystemExit(f"invalid release metadata: {exc}")
+    die(f"invalid release metadata: {exc}")
 if not isinstance(data, dict):
-    raise SystemExit("invalid release metadata: expected an object")
-version = str(data.get("tag_name", "")).lstrip("v")
+    die("release metadata that is not an object")
+raw_tag = data.get("tag_name")
+version = raw_tag.removeprefix("v") if isinstance(raw_tag, str) else ""
+if not version:
+    die("a release with no version tag")
 filename = f"theater-mode-v{version}-linux-{arch}.tar.gz"
 tarball = sha = "-"
 assets = data.get("assets", [])
 if not isinstance(assets, list):
-    raise SystemExit("invalid release metadata: expected an asset list")
+    die("release metadata whose asset list is not a list")
 def https(value):
     # Only HTTPS, so a tampered metadata response cannot point the download elsewhere.
     return value if isinstance(value, str) and value.startswith("https://") else "-"
@@ -81,11 +157,16 @@ for asset in assets:
         sha = https(asset.get("browser_download_url"))
     elif name == filename:
         tarball = https(asset.get("browser_download_url"))
-print(version or "-", tarball, sha)
-' "$ARCH")" || die "GitHub returned invalid release metadata. Try again later."
-read -r VERSION TARBALL_URL SHA_URL <<< "$PARSED"
+fields = [version, tarball, sha]
+if any("\n" in value for value in fields):
+    # One field per line below, so a value carrying a newline would be read as the next one.
+    die("release metadata with a value that spans lines")
+print("\n".join(fields))
+' "$ARCH")"
+{ read -r VERSION; read -r TARBALL_URL; read -r SHA_URL; } <<< "$PARSED"
 
-[ "$VERSION" != "-" ] || die "no published releases found for $REPO"
+[ "$RELEASE_SET" -eq 0 ] || [ "$VERSION" = "$RELEASE" ] \
+    || die "GitHub returned v$VERSION when v$RELEASE was requested; refusing to install it"
 
 if [ "$TARBALL_URL" = "-" ]; then
     printf '\033[31merror:\033[0m release v%s has no build for %s.\n' "$VERSION" "$ARCH" >&2
@@ -94,15 +175,14 @@ if [ "$TARBALL_URL" = "-" ]; then
     printf '    cd theater-mode && ./install.sh --build\n' >&2
     exit 1
 fi
-[ "$SHA_URL" != "-" ] || die "release v$VERSION publishes no checksum; refusing to install it"
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+[ "$SHA_URL" != "-" ] \
+    || die "release v$VERSION publishes no checksum for $ARCH; refusing to install it"
 
 echo "Downloading theater-mode v$VERSION ($ARCH)..."
-fetch "$TARBALL_URL" > "$TMP/release.tar.gz" || die "download failed"
+fetch "$TARBALL_URL" "$TMP/release.tar.gz" "release v$VERSION has no archive for $ARCH on GitHub"
 
-EXPECTED="$(fetch "$SHA_URL" | awk '{print $1}')" || die "could not download the checksum"
+EXPECTED="$(fetch "$SHA_URL" - "release v$VERSION has no checksum for $ARCH on GitHub" \
+    | awk '{print $1}')"
 if [ "${#EXPECTED}" -ne 64 ] || [[ "$EXPECTED" == *[!0-9a-fA-F]* ]]; then
     die "the published checksum is not a valid SHA-256 digest"
 fi
@@ -161,4 +241,4 @@ ROOT="${ROOTS[0]}"
 chmod +x "$ROOT/install.sh"
 
 echo
-exec "$ROOT/install.sh" "$@"
+exec "$ROOT/install.sh" "${INSTALL_ARGS[@]}"

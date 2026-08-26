@@ -388,6 +388,41 @@ class TestCLI(unittest.TestCase):
             self.assertIn("--uninstall", args)
             self.assertIn("--yes", args)
 
+    def test_client_main_update_selects_an_exact_release(self) -> None:
+        with patch("theater_mode.update.apply", return_value=0) as apply:
+            result, _, _, _ = self._run_client(["update", "--release", "0.2.0-beta.1"], "")
+
+        self.assertEqual(result, 0)
+        apply.assert_called_once_with("0.2.0-beta.1")
+
+    def test_client_main_update_defaults_and_check(self) -> None:
+        with patch("theater_mode.update.apply", return_value=0) as apply:
+            result, _, _, _ = self._run_client(["update"], "")
+        self.assertEqual(result, 0)
+        apply.assert_called_once_with(None)
+
+        with patch("theater_mode.update.check", return_value=0) as check:
+            result, _, _, _ = self._run_client(["update", "--check"], "")
+        self.assertEqual(result, 0)
+        check.assert_called_once_with()
+
+    def test_client_main_update_modes_are_mutually_exclusive(self) -> None:
+        stderr = io.StringIO()
+        with self.assertRaises(SystemExit) as caught, contextlib.redirect_stderr(stderr):
+            client_main(["update", "--check", "--release", "0.2.0-beta.1"])
+
+        self.assertEqual(caught.exception.code, 2)
+        self.assertIn("not allowed with argument", stderr.getvalue())
+
+    def test_client_main_update_formats_update_errors(self) -> None:
+        from theater_mode.update import UpdateError
+
+        with patch("theater_mode.update.apply", side_effect=UpdateError("release unavailable")):
+            result, _, stderr, _ = self._run_client(["update"], "")
+
+        self.assertEqual(result, 1)
+        self.assertEqual(stderr, "error: release unavailable\n")
+
 
 if __name__ == "__main__":
     unittest.main()

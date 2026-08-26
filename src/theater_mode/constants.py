@@ -60,7 +60,8 @@ KWIN_CONFIG_FILE = _xdg_dir("XDG_CONFIG_HOME", ".config") / "kwinrc"
 SERVICE_UNIT = "theater-mode.service"
 
 PROJECT_REPO = "seanbrar/theater-mode"
-RELEASE_API = f"https://api.github.com/repos/{PROJECT_REPO}/releases/latest"
+RELEASES_API = f"https://api.github.com/repos/{PROJECT_REPO}/releases"
+RELEASE_API = f"{RELEASES_API}/latest"
 
 STEAM_APP_CLASS = re.compile(r"^steam_app_(\d+)$")
 STEAM_LAUNCH_ARG = re.compile(r"\bAppId=(\d+)\b")

@@ -349,11 +349,17 @@ def main(
         "-y", "--yes", action="store_true", help="Do not prompt for confirmation"
     )
 
-    update_p = subparsers.add_parser("update", help="Update theater-mode to the latest release")
-    update_p.add_argument(
+    update_p = subparsers.add_parser("update", help="Update theater-mode to a published release")
+    update_mode = update_p.add_mutually_exclusive_group()
+    update_mode.add_argument(
         "--check",
         action="store_true",
         help="Report whether a newer release exists without installing it",
+    )
+    update_mode.add_argument(
+        "--release",
+        metavar="VERSION",
+        help="Install an exact published release, including a prerelease or older version",
     )
 
     args = parser.parse_args(argv)
@@ -362,7 +368,7 @@ def main(
         from theater_mode import update as update_mod
 
         try:
-            return update_mod.check() if args.check else update_mod.apply()
+            return update_mod.check() if args.check else update_mod.apply(args.release)
         except update_mod.UpdateError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
