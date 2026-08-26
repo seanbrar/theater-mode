@@ -219,7 +219,7 @@ shellcheck install.sh get.sh bin/check bin/make-release bin/check-abi-floor bin/
     bin/check-ci tools/nested/nested-session.sh tools/nested/session-inner.sh \
     tools/runner/native-lifecycle.sh tools/runner/release-build.sh tools/runner/release-notes.sh \
     tools/runner/release-verify.sh \
-    tools/runner/runner.sh tools/vm/vm.sh
+    tools/runner/runner.sh tools/vm/vm.sh tools/vm/steamos.sh
 
 echo "[check] Running unit tests..."
 if ! python3 -m unittest discover -s tests -t . -q > "$WORK/unittest.log" 2>&1; then
