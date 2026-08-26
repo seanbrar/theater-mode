@@ -6,10 +6,9 @@ therefore describes the *host's* monitors even when the daemon is talking to a n
 compositor. Bind-mounting a synthetic tree over /sys/class/drm lets the daemon see the
 outputs the nested compositor actually advertises.
 
-The tree is also the cheapest way to reach EDID cases no real desk can produce: a display
-whose EDID is absent, truncated, or fails its checksum, a vendor whose PnP code is not in
-hwdata, or four monitors on a machine with one. Those paths are documented as
-fault-tolerant in `.local/docs/architecture.md` §6; this is how they get exercised.
+The tree also exercises the fault-tolerant paths for an absent, truncated, or invalid
+EDID, a vendor whose PnP code is not in hwdata, and layouts no real desk can produce, such
+as four monitors on a machine with one.
 
 Only the fields `display/edid.py` and `display/drm.py` actually read are synthesized:
 the header, the packed manufacturer ID, the product code and serial number, the monitor
