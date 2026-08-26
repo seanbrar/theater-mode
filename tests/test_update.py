@@ -59,7 +59,11 @@ def _release_payload(version="2.0.0", arch="x86_64", with_checksum=True):
 class ReleaseGrammarTests(unittest.TestCase):
     """Verify release version regexes match across shell and Python implementations."""
 
-    SHELL_SOURCES = ("get.sh", "tools/runner/release-build.sh")
+    SHELL_SOURCES = (
+        "get.sh",
+        "tools/runner/release-build.sh",
+        "tools/runner/release-notes.sh",
+    )
     SAMPLES = (
         "1.2.3",
         "0.0.0",

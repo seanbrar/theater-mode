@@ -90,7 +90,7 @@ git ls-files --cached -z -- . "${EXCLUDE[@]}" \
 # A release ships the runtime tree and nothing else. Anything new and dev-only at the top
 # level must be added to DEV_ONLY above, so fail loudly rather than shipping it by
 # omission. Uses find rather than a glob so a stray dotfile cannot slip through unseen.
-EXPECTED_TOP="LICENSE README.md bin config.reference.toml install.sh kwin src systemd"
+EXPECTED_TOP="CHANGELOG.md LICENSE README.md bin config.reference.toml install.sh kwin src systemd"
 ACTUAL_TOP="$(find "$ROOT" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 [ "$ACTUAL_TOP" = "$EXPECTED_TOP" ] \
     || die "unexpected release layout.

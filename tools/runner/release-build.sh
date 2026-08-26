@@ -9,14 +9,20 @@ cd "$repo_dir"
 
 [ $# -ge 1 ] || die "usage: release-build.sh OUTPUT_DIR [TAG]"
 out_dir="$1"
-tag="${2:-}"
+requested_tag="${2:-}"
+if [ -n "$requested_tag" ] && [[ "$requested_tag" != v* ]]; then
+    die "release tag must start with v: $requested_tag"
+fi
 source_version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' src/theater_mode/__init__.py)"
 [ -n "$source_version" ] || die "could not read the source version"
 [[ "$source_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc|exp)\.(0|[1-9][0-9]*))?$ ]] \
     || die "unsupported release version: $source_version"
-[ -n "$tag" ] || tag="v$source_version"
-[ "${tag#v}" = "$source_version" ] \
+tag="${requested_tag:-v$source_version}"
+[ "$tag" = "v$source_version" ] \
     || die "tag $tag does not match __version__ $source_version"
+
+# A rehearsal build names no tag, and runs before the release notes are written.
+[ -z "$requested_tag" ] || tools/runner/release-notes.sh "$tag" >/dev/null
 
 ldd --version | sed -n 1p
 pkg-config --modversion wayland-client

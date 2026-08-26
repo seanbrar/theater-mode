@@ -181,6 +181,9 @@ Update to the newest release:
 theater-mode update
 ```
 
+See what changed in each release on the
+[releases page](https://github.com/seanbrar/theater-mode/releases).
+
 Remove theater-mode:
 
 ```sh
